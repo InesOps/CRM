@@ -66,7 +66,7 @@ export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings }: 
             <Building2 size={16} color="white" />
           </div>
           <div>
-            <div className="text-sm font-semibold" style={{ color: "#F8FAFC" }}>CRM Pro</div>
+            <div className="text-sm font-semibold" style={{ color: "#F8FAFC" }}>CRM Arabsoft</div>
             <div className="text-xs" style={{ color: "#475569" }}>Espace de travail</div>
           </div>
         </div>

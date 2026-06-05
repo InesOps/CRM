@@ -72,7 +72,7 @@ export function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-foreground">Tableau de bord</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">Jeudi 4 juin 2026 — Bienvenue, Ahmed</p>
+          <p className="text-muted-foreground text-sm mt-0.5">Vendredi 5 juin 2026 — Bienvenue</p>
         </div>
         <div className="flex items-center gap-2">
           <select className="text-sm border border-border rounded-lg px-3 py-2 bg-card text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30">
