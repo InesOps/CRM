@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Eye, EyeOff, Building2, Mail, Lock, AlertCircle, ArrowLeft, CheckCircle, User, UserPlus } from "lucide-react";
-import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { sendPasswordResetEmail, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { doc, setDoc, Timestamp } from "firebase/firestore";
 import { auth, db } from "../../firebase/config";
+import { login } from "../../firebase/auth";
 
 type View = "login" | "forgot" | "register";
 
@@ -36,7 +37,7 @@ export function LoginScreen() {
     setError("");
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await login(email, password);
     } catch (err: any) {
       switch (err.code) {
         case "auth/user-not-found":

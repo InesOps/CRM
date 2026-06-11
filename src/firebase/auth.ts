@@ -3,13 +3,18 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  setPersistence,
+  browserSessionPersistence,
   User
 } from 'firebase/auth';
 import { auth } from './config';
 
-// Login
-export const login = (email: string, password: string) =>
-  signInWithEmailAndPassword(auth, email, password);
+// Await persistence first so signInWithEmailAndPassword never races with a
+// pending setPersistence call (which would throw auth/user-storage-busy).
+export const login = async (email: string, password: string) => {
+  await setPersistence(auth, browserSessionPersistence);
+  return signInWithEmailAndPassword(auth, email, password);
+};
 
 // Logout
 export const logout = () => signOut(auth);

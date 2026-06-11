@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, Plus, Clock, Users, MapPin, X, Check, Trash2, Pencil, Loader2 } from "lucide-react";
 import {
-  getCalendarEvents,
-  addCalendarEvent,
-  updateCalendarEvent,
-  deleteCalendarEvent,
+  getCalendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent,
 } from "../../firebase/crud/calendar";
+import { getAllStaff, type StaffMember } from "../../firebase/crud/users";
+import type { UserRole } from "../../hooks/useAuth";
 
 interface Meeting {
   id: string;
@@ -17,6 +16,11 @@ interface Meeting {
   location: string;
   type: "meeting" | "call" | "demo" | "internal";
   notes: string;
+}
+
+interface CalendarViewProps {
+  role: UserRole | null;
+  userId: string;
 }
 
 const TYPE_STYLES = {
@@ -39,20 +43,44 @@ function getCalendarDays(year: number, month: number) {
   return days;
 }
 
-// ── Modal ─────────────────────────────────────────────────────────────────────
-function MeetingModal({ meeting, saving, onClose, onSave }: {
+function MeetingModal({ meeting, saving, onClose, onSave, staff }: {
   meeting: Partial<Meeting>;
   saving: boolean;
   onClose: () => void;
   onSave: (m: Omit<Meeting, "id">, existingId?: string) => void;
+  staff: StaffMember[];
 }) {
-  const [form, setForm] = useState<Partial<Meeting>>(meeting);
+  const [form, setForm]             = useState<Partial<Meeting>>(meeting);
+  const [selectedStaff, setSelectedStaff] = useState<string[]>(() => {
+    if (meeting.participants && meeting.type === "internal") {
+      return meeting.participants.split(",").map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+  });
+
   const set = (k: keyof Meeting, v: any) => setForm(f => ({ ...f, [k]: v }));
   const canSave = !!form.title?.trim() && !!form.date;
+  const isInternal = form.type === "internal";
+
+  const toggleStaff = (uid: string) => {
+    setSelectedStaff(prev =>
+      prev.includes(uid) ? prev.filter(x => x !== uid) : [...prev, uid]
+    );
+  };
+
+  const getStaffName = (member: StaffMember) =>
+    [member.firstName, member.lastName].filter(Boolean).join(" ") || member.email;
+
+  const participantsValue = isInternal
+    ? selectedStaff.map(uid => {
+        const m = staff.find(s => s.uid === uid);
+        return m ? getStaffName(m) : uid;
+      }).join(", ")
+    : form.participants ?? "";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(15,23,42,0.5)" }}>
-      <div className="bg-card rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+      <div className="bg-card rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-foreground">{meeting.id ? "Modifier le rendez-vous" : "Nouveau rendez-vous"}</h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted"><X size={16} className="text-muted-foreground" /></button>
@@ -89,7 +117,7 @@ function MeetingModal({ meeting, saving, onClose, onSave }: {
                 <option value="meeting">Réunion</option>
                 <option value="call">Appel</option>
                 <option value="demo">Démo</option>
-                <option value="internal">Interne</option>
+                <option value="internal">Interne (équipe)</option>
               </select>
             </div>
             <div>
@@ -98,11 +126,36 @@ function MeetingModal({ meeting, saving, onClose, onSave }: {
                 className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
           </div>
+
+          {/* Participants: staff checklist for internal, free text otherwise */}
           <div>
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Participants</label>
-            <input value={form.participants || ""} onChange={e => set("participants", e.target.value)}
-              className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Participants{isInternal ? " (membres de l'équipe)" : ""}
+            </label>
+            {isInternal && staff.length > 0 ? (
+              <div className="mt-1 border border-border rounded-lg bg-background max-h-36 overflow-y-auto divide-y divide-border">
+                {staff.map(member => (
+                  <label key={member.uid} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={selectedStaff.includes(member.uid)}
+                      onChange={() => toggleStaff(member.uid)}
+                      className="w-3.5 h-3.5 rounded accent-primary"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm text-foreground truncate">{getStaffName(member)}</p>
+                      <p className="text-xs text-muted-foreground truncate">{member.email}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <input value={form.participants || ""} onChange={e => set("participants", e.target.value)}
+                placeholder="Noms des participants…"
+                className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            )}
           </div>
+
           <div>
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Notes</label>
             <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)}
@@ -122,7 +175,7 @@ function MeetingModal({ meeting, saving, onClose, onSave }: {
               endTime:      form.endTime      ?? "10:00",
               type:         form.type         ?? "meeting",
               location:     form.location     ?? "",
-              participants: form.participants ?? "",
+              participants: participantsValue,
               notes:        form.notes        ?? "",
             }, meeting.id)}
             disabled={saving || !canSave}
@@ -138,12 +191,12 @@ function MeetingModal({ meeting, saving, onClose, onSave }: {
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-export function CalendarView() {
+export function CalendarView(_props: CalendarViewProps) {
   const today = new Date();
   const [year,           setYear]           = useState(today.getFullYear());
   const [month,          setMonth]          = useState(today.getMonth());
   const [meetings,       setMeetings]       = useState<Meeting[]>([]);
+  const [staff,          setStaff]          = useState<StaffMember[]>([]);
   const [loading,        setLoading]        = useState(true);
   const [saving,         setSaving]         = useState(false);
   const [editingMeeting, setEditingMeeting] = useState<Partial<Meeting> | undefined>(undefined);
@@ -156,19 +209,21 @@ export function CalendarView() {
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
 
-  // READ
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const snap = await getCalendarEvents();
-        setMeetings(snap.docs.map(d => ({ id: d.id, ...d.data() } as Meeting)));
+        const [calSnap, staffList] = await Promise.all([
+          getCalendarEvents(),
+          getAllStaff(),
+        ]);
+        setMeetings(calSnap.docs.map(d => ({ id: d.id, ...d.data() } as Meeting)));
+        setStaff(staffList);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();
   }, []);
 
-  // CREATE / UPDATE
   const handleSave = async (formData: Omit<Meeting, "id">, existingId?: string) => {
     setSaving(true);
     try {
@@ -184,7 +239,6 @@ export function CalendarView() {
     finally { setSaving(false); }
   };
 
-  // DELETE
   const handleDelete = async (id: string) => {
     try {
       await deleteCalendarEvent(id);
@@ -335,17 +389,16 @@ export function CalendarView() {
         </div>
       )}
 
-      {/* Edit / Create modal */}
       {editingMeeting !== undefined && (
         <MeetingModal
           meeting={editingMeeting}
           saving={saving}
+          staff={staff}
           onClose={() => setEditingMeeting(undefined)}
           onSave={handleSave}
         />
       )}
 
-      {/* Delete confirmation */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(15,23,42,0.55)" }}>
           <div className="bg-card rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">

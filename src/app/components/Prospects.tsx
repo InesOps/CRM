@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { Plus, Phone, Mail, Edit2, Trash2, Check, X, ChevronRight, ArrowRight, Loader2 } from "lucide-react";
-import {
-  getProspects,
-  addProspect,
-  updateProspect,
-  deleteProspect,
-  getNextProspectId,
-} from "../../firebase/crud/prospects";
+import { Plus, Phone, Mail, Edit2, Trash2, Check, X, ChevronRight, ArrowRight, Loader2, UserCheck, ArrowUpCircle, Eye } from "lucide-react";
+import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
+import { db } from "../../firebase/config";
+import { addProspect, updateProspect, deleteProspect } from "../../firebase/crud/prospects";
+import { getNextContactId, addContact } from "../../firebase/crud/contacts";
+
+import { getAgents, type StaffMember } from "../../firebase/crud/users";
+import type { UserRole } from "../../hooks/useAuth";
 
 type Stage = "identification" | "qualification" | "proposition" | "negociation" | "gagne" | "perdu";
 
@@ -22,11 +22,17 @@ interface Prospect {
   value: number;
   probability: number;
   assignee: string;
+  assignedTo?: string;
   nextAction: string;
   nextActionDate: string;
   source: string;
   notes: string;
   type: "prospect";
+}
+
+interface ProspectsProps {
+  role: UserRole | null;
+  userId: string;
 }
 
 const STAGES: { id: Stage; label: string; color: string; bg: string }[] = [
@@ -38,25 +44,27 @@ const STAGES: { id: Stage; label: string; color: string; bg: string }[] = [
   { id: "perdu",          label: "Perdu",          color: "#EF4444", bg: "#FEE2E2" },
 ];
 
-const emptyForm = (): Partial<Prospect> => ({
+const emptyForm = (userId: string): Partial<Prospect> => ({
   Name: "", Lastname: "", company: "", email: "", phone: "",
   stage: "identification", value: 0, probability: 20,
-  assignee: "", nextAction: "", nextActionDate: "",
+  assignee: "", assignedTo: userId, nextAction: "", nextActionDate: "",
   source: "", notes: "", type: "prospect",
 });
 
-// ── Modal ─────────────────────────────────────────────────────────────────────
 function ProspectModal({
-  prospect, saving, onClose, onSave,
+  prospect, saving, onClose, onSave, agents, role,
 }: {
   prospect: Partial<Prospect>;
   saving: boolean;
   onClose: () => void;
   onSave: (p: Omit<Prospect, "id" | "prospectId">) => void;
+  agents: StaffMember[];
+  role: UserRole | null;
 }) {
   const [form, setForm] = useState<Partial<Prospect>>(prospect);
   const set = (k: keyof Prospect, v: any) => setForm(f => ({ ...f, [k]: v }));
   const canSave = form.Name?.trim() && form.company?.trim();
+  const canAssign = role === "admin" || role === "manager";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(15,23,42,0.5)" }}>
@@ -115,12 +123,28 @@ function ProspectModal({
             <input type="number" min={0} max={100} value={form.probability || ""} onChange={e => set("probability", Number(e.target.value))}
               className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Assigné à</label>
-            <input value={form.assignee || ""} onChange={e => set("assignee", e.target.value)}
-              placeholder="Initiales" maxLength={3}
-              className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
-          </div>
+
+          {canAssign && agents.length > 0 ? (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Assigner à</label>
+              <select value={form.assignedTo || ""} onChange={e => set("assignedTo", e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <option value="">— Non assigné —</option>
+                {agents.map(a => {
+                  const name = [a.firstName, a.lastName].filter(Boolean).join(" ") || a.email;
+                  return <option key={a.uid} value={a.uid}>{name}</option>;
+                })}
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Initiales</label>
+              <input value={form.assignee || ""} onChange={e => set("assignee", e.target.value)}
+                placeholder="Initiales" maxLength={3}
+                className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+          )}
+
           <div className="col-span-2">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Prochaine action</label>
             <input value={form.nextAction || ""} onChange={e => set("nextAction", e.target.value)}
@@ -145,20 +169,13 @@ function ProspectModal({
           </button>
           <button
             onClick={() => canSave && onSave({
-              Name:           form.Name!,
-              Lastname:       form.Lastname    ?? "",
-              company:        form.company!,
-              email:          form.email       ?? "",
-              phone:          form.phone       ?? "",
-              stage:          form.stage       ?? "identification",
-              value:          form.value       ?? 0,
-              probability:    form.probability ?? 20,
-              assignee:       form.assignee    ?? "",
-              nextAction:     form.nextAction  ?? "",
-              nextActionDate: form.nextActionDate ?? "",
-              source:         form.source      ?? "",
-              notes:          form.notes       ?? "",
-              type:           "prospect",
+              Name: form.Name!, Lastname: form.Lastname ?? "",
+              company: form.company!, email: form.email ?? "",
+              phone: form.phone ?? "", stage: form.stage ?? "identification",
+              value: form.value ?? 0, probability: form.probability ?? 20,
+              assignee: form.assignee ?? "", assignedTo: form.assignedTo ?? undefined,
+              nextAction: form.nextAction ?? "", nextActionDate: form.nextActionDate ?? "",
+              source: form.source ?? "", notes: form.notes ?? "", type: "prospect",
             })}
             disabled={saving || !canSave}
             className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
@@ -173,28 +190,93 @@ function ProspectModal({
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-export function Prospects() {
+function ProspectViewModal({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
+  const st       = STAGES.find(s => s.id === prospect.stage) ?? STAGES[0];
+  const initials = `${prospect.Name?.[0] ?? ""}${prospect.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
+
+  const fields: { label: string; value: string | number | undefined }[] = [
+    { label: "Entreprise",          value: prospect.company },
+    { label: "Email",               value: prospect.email },
+    { label: "Téléphone",           value: prospect.phone },
+    { label: "Source",              value: prospect.source },
+    { label: "Valeur",              value: prospect.value ? `${Number(prospect.value).toLocaleString("fr-FR")} DT` : undefined },
+    { label: "Probabilité",         value: prospect.probability != null ? `${prospect.probability}%` : undefined },
+    { label: "Prochaine action",    value: prospect.nextAction },
+    { label: "Date prochaine action", value: prospect.nextActionDate
+        ? new Date(prospect.nextActionDate + "T12:00").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+        : undefined },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(15,23,42,0.55)" }}>
+      <div className="bg-card rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shrink-0"
+              style={{ background: st.bg, color: st.color }}>{initials}</div>
+            <div>
+              <h2 className="text-foreground">{prospect.Name} {prospect.Lastname}</h2>
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: st.bg, color: st.color }}>{st.label}</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted"><X size={16} className="text-muted-foreground" /></button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {fields.filter(f => f.value).map(f => (
+            <div key={f.label} className="bg-muted/40 rounded-xl p-3">
+              <p className="text-xs text-muted-foreground mb-0.5">{f.label}</p>
+              <p className="text-sm font-medium text-foreground">{f.value}</p>
+            </div>
+          ))}
+        </div>
+
+        {prospect.notes && (
+          <div className="mt-3 bg-muted/40 rounded-xl p-3">
+            <p className="text-xs text-muted-foreground mb-1">Notes</p>
+            <p className="text-sm text-foreground whitespace-pre-wrap">{prospect.notes}</p>
+          </div>
+        )}
+
+        <button onClick={onClose} className="w-full mt-5 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function Prospects({ role, userId }: ProspectsProps) {
   const [prospects,       setProspects]       = useState<Prospect[]>([]);
+  const [agents,          setAgents]          = useState<StaffMember[]>([]);
   const [loading,         setLoading]         = useState(true);
   const [saving,          setSaving]          = useState(false);
+  const [converting,      setConverting]      = useState<string | null>(null);
   const [stageFilter,     setStageFilter]     = useState<Stage | "all">("all");
   const [editingProspect, setEditingProspect] = useState<Partial<Prospect> | undefined>(undefined);
   const [deleteConfirm,   setDeleteConfirm]   = useState<Prospect | null>(null);
+  const [viewingProspect, setViewingProspect] = useState<Prospect | null>(null);
 
-  // READ
+  const isAgent = role === "agent";
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "prospects"), orderBy("prospectId")));
+      setProspects(snap.docs.map(d => ({ id: d.id, ...d.data() } as Prospect)));
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  };
+
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const snap = await getProspects();
-        setProspects(snap.docs.map(d => ({ id: d.id, ...d.data() } as Prospect)));
-      } catch (e) { console.error(e); }
-      finally { setLoading(false); }
-    })();
-  }, []);
+    load();
+    getAgents().then(setAgents);
+  }, [role, userId]);
 
-  // CREATE / UPDATE
+  const agentNameMap = Object.fromEntries(
+    agents.map(a => [a.uid, [a.firstName, a.lastName].filter(Boolean).join(" ") || a.email])
+  );
+
   const handleSave = async (
     formData: Omit<Prospect, "id" | "prospectId">,
     existing?: Partial<Prospect>
@@ -202,20 +284,16 @@ export function Prospects() {
     setSaving(true);
     try {
       if (existing?.id) {
-        // UPDATE
         await updateProspect(existing.id, { ...formData, prospectId: existing.prospectId });
         setProspects(ps => ps.map(p =>
           p.id === existing.id ? { ...p, ...formData, prospectId: existing.prospectId! } : p
         ));
       } else {
-        // CREATE — getNextProspectId is called inside addProspect
-        const ref = await addProspect(formData);
-        // Re-fetch the doc to get the prospectId assigned by addProspect
-        const snap = await getProspects();
-        const newDoc = snap.docs.find(d => d.id === ref.id);
-        if (newDoc) {
-          setProspects(ps => [...ps, { id: newDoc.id, ...newDoc.data() } as Prospect]
-            .sort((a, b) => (a.prospectId ?? 0) - (b.prospectId ?? 0)));
+        const payload = { ...formData, assignedTo: formData.assignedTo || userId };
+        const ref = await addProspect(payload as any);
+        const newSnap = await getDocs(query(collection(db, "prospects"), where("__name__", "==", ref.id)));
+        if (!newSnap.empty) {
+          setProspects(ps => [...ps, { id: newSnap.docs[0].id, ...newSnap.docs[0].data() } as Prospect]);
         }
       }
       setEditingProspect(undefined);
@@ -223,19 +301,40 @@ export function Prospects() {
     finally { setSaving(false); }
   };
 
-  // ADVANCE STAGE
   const advanceStage = async (p: Prospect) => {
     const idx = STAGES.findIndex(s => s.id === p.stage);
     if (idx < STAGES.length - 2) {
       const nextStage = STAGES[idx + 1].id;
-      try {
-        await updateProspect(p.id, { stage: nextStage });
-        setProspects(ps => ps.map(x => x.id === p.id ? { ...x, stage: nextStage } : x));
-      } catch (e) { console.error(e); }
+      await updateProspect(p.id, { stage: nextStage });
+      setProspects(ps => ps.map(x => x.id === p.id ? { ...x, stage: nextStage } : x));
     }
   };
 
-  // DELETE
+  const convertToClient = async (p: Prospect) => {
+    if (!confirm(`Convertir "${p.Name} ${p.Lastname}" en client ?`)) return;
+    setConverting(p.id);
+    try {
+      const contactId = await getNextContactId();
+      await addContact({
+        contactId,
+        Name:        p.Name,
+        Lastname:    p.Lastname,
+        Company:     p.company,
+        Email:       p.email,
+        Phone:       p.phone,
+        type:        "client",
+        status:      "actif",
+        lastContact: new Date().toISOString().split("T")[0],
+        tags:        [],
+        DealValue:   p.value || undefined,
+        assignedTo:  p.assignedTo || userId,
+      });
+      await deleteProspect(p.id);
+      setProspects(ps => ps.filter(x => x.id !== p.id));
+    } catch (e) { console.error(e); }
+    finally { setConverting(null); }
+  };
+
   const handleDelete = async (prospect: Prospect) => {
     try {
       await deleteProspect(prospect.id);
@@ -257,11 +356,13 @@ export function Prospects() {
           <h1 className="text-foreground">Prospects</h1>
           <p className="text-muted-foreground text-sm mt-0.5">{prospects.length} prospects dans le pipeline</p>
         </div>
-        <button onClick={() => setEditingProspect(emptyForm())}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white hover:opacity-90"
-          style={{ background: "var(--primary)" }}>
-          <Plus size={16} /> Nouveau prospect
-        </button>
+        {!isAgent && (
+          <button onClick={() => setEditingProspect(emptyForm(userId))}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white hover:opacity-90"
+            style={{ background: "var(--primary)" }}>
+            <Plus size={16} /> Nouveau prospect
+          </button>
+        )}
       </div>
 
       {/* KPIs */}
@@ -308,9 +409,11 @@ export function Prospects() {
         ) : (
           filtered.map(p => {
             const st = STAGES.find(s => s.id === p.stage)!;
-            const canAdvance = p.stage !== "gagne" && p.stage !== "perdu";
-            const fullName = `${p.Name ?? ""} ${p.Lastname ?? ""}`.trim();
-            const initials = `${p.Name?.[0] ?? ""}${p.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
+            const canAdvance  = p.stage !== "gagne" && p.stage !== "perdu";
+            const canConvert  = p.stage !== "perdu";
+            const fullName    = `${p.Name ?? ""} ${p.Lastname ?? ""}`.trim();
+            const initials    = `${p.Name?.[0] ?? ""}${p.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
+            const assigneeName = p.assignedTo ? (agentNameMap[p.assignedTo] ?? p.assignee) : p.assignee;
 
             return (
               <div key={p.id} className="bg-card rounded-xl border border-border p-4 hover:shadow-md transition-shadow">
@@ -320,10 +423,15 @@ export function Prospects() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-semibold text-foreground">{fullName}</p>
                           <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: st.bg, color: st.color }}>{st.label}</span>
                           {p.prospectId && <span className="text-xs font-mono text-muted-foreground">#{p.prospectId}</span>}
+                          {assigneeName && (
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <UserCheck size={10} /> {assigneeName}
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground">{p.company}{p.source ? ` · Source: ${p.source}` : ""}</p>
                       </div>
@@ -353,19 +461,41 @@ export function Prospects() {
                         )}
                       </div>
                       <div className="flex items-center gap-1">
-                        {canAdvance && (
-                          <button onClick={() => advanceStage(p)}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs hover:opacity-90"
-                            style={{ background: st.bg, color: st.color }}>
-                            Avancer <ChevronRight size={11} />
+                        {isAgent ? (
+                          <button onClick={() => setViewingProspect(p)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Voir les infos">
+                            <Eye size={12} className="text-muted-foreground" />
                           </button>
+                        ) : (
+                          <>
+                            {canConvert && (
+                              <button
+                                onClick={() => convertToClient(p)}
+                                disabled={converting === p.id}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:opacity-90"
+                                style={{ background: "#D1FAE5", color: "#10B981" }}
+                                title="Convertir en client"
+                              >
+                                {converting === p.id
+                                  ? <Loader2 size={11} className="animate-spin" />
+                                  : <ArrowUpCircle size={11} />}
+                                Client
+                              </button>
+                            )}
+                            {canAdvance && (
+                              <button onClick={() => advanceStage(p)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs hover:opacity-90"
+                                style={{ background: st.bg, color: st.color }}>
+                                Avancer <ChevronRight size={11} />
+                              </button>
+                            )}
+                            <button onClick={() => setEditingProspect(p)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                              <Edit2 size={12} className="text-muted-foreground" />
+                            </button>
+                            <button onClick={() => setDeleteConfirm(p)} className="p-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                              <Trash2 size={12} color="#EF4444" />
+                            </button>
+                          </>
                         )}
-                        <button onClick={() => setEditingProspect(p)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                          <Edit2 size={12} className="text-muted-foreground" />
-                        </button>
-                        <button onClick={() => setDeleteConfirm(p)} className="p-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                          <Trash2 size={12} color="#EF4444" />
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -380,6 +510,8 @@ export function Prospects() {
         <ProspectModal
           prospect={editingProspect}
           saving={saving}
+          agents={agents}
+          role={role}
           onClose={() => setEditingProspect(undefined)}
           onSave={(data) => handleSave(data, editingProspect)}
         />
@@ -396,6 +528,10 @@ export function Prospects() {
             </div>
           </div>
         </div>
+      )}
+
+      {viewingProspect && (
+        <ProspectViewModal prospect={viewingProspect} onClose={() => setViewingProspect(null)} />
       )}
     </div>
   );

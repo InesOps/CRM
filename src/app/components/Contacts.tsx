@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { Search, Plus, Mail, Phone, Building, Trash2, Edit2, Check, X, Loader2 } from "lucide-react";
+import { Search, Plus, Mail, Phone, Building, Trash2, Edit2, Check, X, Loader2, UserCheck, Eye } from "lucide-react";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "../../firebase/config";
 import {
-  getNextContactId,
-  getContacts,
-  addContact,
-  updateContact,
-  deleteContact,
+  getNextContactId, addContact, updateContact, deleteContact,
 } from "../../firebase/crud/contacts";
+import { getAllStaff, type StaffMember } from "../../firebase/crud/users";
+import type { UserRole } from "../../hooks/useAuth";
 
 type ContactType   = "client" | "fournisseur" | "partenaire";
 type ContactStatus = "actif" | "inactif";
@@ -24,6 +24,12 @@ interface Contact {
   lastContact: string;
   tags: string[];
   DealValue?: number;
+  assignedTo?: string;
+}
+
+interface ContactsProps {
+  role: UserRole | null;
+  userId: string;
 }
 
 const TYPE_STYLES: Record<ContactType, { label: string; color: string; bg: string }> = {
@@ -32,14 +38,78 @@ const TYPE_STYLES: Record<ContactType, { label: string; color: string; bg: strin
   partenaire:  { label: "Partenaire",  color: "#10B981", bg: "#D1FAE5" },
 };
 
-// ── Modal ─────────────────────────────────────────────────────────────────────
+function ContactViewModal({ contact, onClose }: { contact: Contact; onClose: () => void }) {
+  const ts       = TYPE_STYLES[contact.type] ?? TYPE_STYLES.client;
+  const initials = `${contact.Name?.[0] ?? ""}${contact.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
+
+  const fields: { label: string; value: string | undefined }[] = [
+    { label: "Entreprise",      value: contact.Company },
+    { label: "Email",           value: contact.Email },
+    { label: "Téléphone",       value: contact.Phone },
+    { label: "Statut",          value: contact.status === "actif" ? "Actif" : "Inactif" },
+    { label: "Dernier contact", value: contact.lastContact
+        ? new Date(contact.lastContact).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+        : undefined },
+    ...(contact.type === "client" && contact.DealValue
+        ? [{ label: "CA Annuel", value: `${Number(contact.DealValue).toLocaleString("fr-FR")} DT` }]
+        : []),
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(15,23,42,0.55)" }}>
+      <div className="bg-card rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-start justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold shrink-0"
+              style={{ background: ts.bg, color: ts.color }}>{initials}</div>
+            <div>
+              <h2 className="text-foreground leading-tight">{contact.Name} {contact.Lastname}</h2>
+              <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                style={{ background: ts.bg, color: ts.color }}>{ts.label}</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted shrink-0">
+            <X size={16} className="text-muted-foreground" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map(f => (
+            <div key={f.label} className="p-3 rounded-xl" style={{ background: "var(--background)" }}>
+              <p className="text-xs text-muted-foreground mb-1">{f.label}</p>
+              <p className="text-sm font-medium text-foreground">{f.value || "—"}</p>
+            </div>
+          ))}
+          {contact.tags?.length > 0 && (
+            <div className="col-span-2 p-3 rounded-xl" style={{ background: "var(--background)" }}>
+              <p className="text-xs text-muted-foreground mb-2">Tags</p>
+              <div className="flex flex-wrap gap-1.5">
+                {contact.tags.map(t => (
+                  <span key={t} className="px-2 py-0.5 rounded-full text-xs border border-border text-foreground">{t}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button onClick={onClose}
+          className="w-full mt-5 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted">
+          Fermer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ContactModal({
-  contact, saving, onClose, onSave,
+  contact, saving, onClose, onSave, agents, role,
 }: {
   contact: Partial<Contact>;
   saving: boolean;
   onClose: () => void;
   onSave: (data: Omit<Contact, "id" | "contactId">) => void;
+  agents: StaffMember[];
+  role: UserRole | null;
 }) {
   const [Name,        setName]        = useState(contact.Name        ?? "");
   const [Lastname,    setLastname]    = useState(contact.Lastname    ?? "");
@@ -52,6 +122,7 @@ function ContactModal({
   const [tagInput,    setTagInput]    = useState("");
   const [tags,        setTags]        = useState<string[]>(contact.tags ?? []);
   const [DealValue,   setDealValue]   = useState(contact.DealValue?.toString() ?? "");
+  const [assignedTo,  setAssignedTo]  = useState(contact.assignedTo ?? "");
 
   const addTag = () => {
     const t = tagInput.trim();
@@ -60,6 +131,7 @@ function ContactModal({
   };
 
   const canSave = Name.trim() && Email.trim();
+  const canAssign = role === "admin" || role === "manager";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(15,23,42,0.55)" }}>
@@ -120,12 +192,26 @@ function ContactModal({
               className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
 
-          {/* CA Annuel — clients only */}
           {type === "client" && (
             <div className="col-span-2">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CA Annuel (DT)</label>
               <input type="number" value={DealValue} onChange={e => setDealValue(e.target.value)}
                 className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+          )}
+
+          {canAssign && agents.length > 0 && (
+            <div className="col-span-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Assigner à</label>
+              <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <option value="">— Non assigné —</option>
+                {agents.map(a => {
+                  const name = [a.firstName, a.lastName].filter(Boolean).join(" ") || a.email;
+                  const roleLabel = a.role === "manager" ? "Manager" : "Commercial";
+                  return <option key={a.uid} value={a.uid}>{name} ({roleLabel})</option>;
+                })}
+              </select>
             </div>
           )}
 
@@ -161,6 +247,7 @@ function ContactModal({
             onClick={() => canSave && onSave({
               Name, Lastname, Company, Email, Phone, type, status, lastContact, tags,
               DealValue: type === "client" && DealValue ? Number(DealValue) : undefined,
+              assignedTo: assignedTo || undefined,
             })}
             disabled={saving || !canSave}
             className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
@@ -175,67 +262,60 @@ function ContactModal({
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-export function Contacts() {
+export function Contacts({ role, userId }: ContactsProps) {
   const [contacts,       setContacts]       = useState<Contact[]>([]);
+  const [agents,         setAgents]         = useState<StaffMember[]>([]);
   const [loading,        setLoading]        = useState(true);
   const [saving,         setSaving]         = useState(false);
   const [filter,         setFilter]         = useState<ContactType | "all">("all");
   const [search,         setSearch]         = useState("");
   const [editingContact, setEditingContact] = useState<Partial<Contact> | undefined>(undefined);
+  const [viewingContact, setViewingContact] = useState<Contact | null>(null);
   const [deleteConfirm,  setDeleteConfirm]  = useState<Contact | null>(null);
 
-  // READ — contacts collection only (no prospects)
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const snap = await getContacts();
-        setContacts(snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Contact))
-          .sort((a, b) => (a.contactId ?? 0) - (b.contactId ?? 0))
-        );
-      } catch (e) { console.error(e); }
-      finally { setLoading(false); }
-    })();
-  }, []);
+  const isAgent   = role === "agent";
+  const canCreate = !isAgent; // agents can't create clients directly
 
-  // CREATE / UPDATE
+  const load = async () => {
+    setLoading(true);
+    try {
+      const snap = await getDocs(collection(db, "contacts"));
+      setContacts(snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Contact))
+        .sort((a, b) => (a.contactId ?? 0) - (b.contactId ?? 0))
+      );
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    load();
+    getAllStaff().then(all => setAgents(all.filter(m => m.role !== "admin")));
+  }, [role, userId]);
+
   const handleSave = async (
     formData: Omit<Contact, "id" | "contactId">,
     existing?: Partial<Contact>
   ) => {
     setSaving(true);
-
-    // Only the fields we want in Firestore
     const payload: any = {
-      Name:        formData.Name,
-      Lastname:    formData.Lastname,
-      Company:     formData.Company,
-      Email:       formData.Email,
-      Phone:       formData.Phone,
-      type:        formData.type,
-      status:      formData.status,
-      lastContact: formData.lastContact,
-      tags:        formData.tags,
+      Name: formData.Name, Lastname: formData.Lastname,
+      Company: formData.Company, Email: formData.Email, Phone: formData.Phone,
+      type: formData.type, status: formData.status,
+      lastContact: formData.lastContact, tags: formData.tags,
+      assignedTo: formData.assignedTo ?? null,
     };
     if (formData.type === "client" && formData.DealValue !== undefined) {
       payload.DealValue = formData.DealValue;
     } else {
-      // Remove DealValue if type changed away from client
       payload.DealValue = null;
     }
 
     try {
       if (existing?.id) {
-        // UPDATE — strip contactId from the update payload to avoid overwrite bug
-        const { contactId, ...fieldsToUpdate } = payload;
-        await updateContact(existing.id, fieldsToUpdate);
-        setContacts(cs => cs.map(c =>
-          c.id === existing.id ? { ...c, ...fieldsToUpdate } : c
-        ));
+        await updateContact(existing.id, payload);
+        setContacts(cs => cs.map(c => c.id === existing.id ? { ...c, ...payload } : c));
       } else {
-        // CREATE
         const newId = await getNextContactId();
         payload.contactId = newId;
         const ref = await addContact(payload);
@@ -248,7 +328,6 @@ export function Contacts() {
     finally { setSaving(false); }
   };
 
-  // DELETE
   const handleDelete = async (contact: Contact) => {
     try {
       await deleteContact(contact.id);
@@ -256,6 +335,10 @@ export function Contacts() {
     } catch (e) { console.error(e); }
     finally { setDeleteConfirm(null); }
   };
+
+  const agentNameMap = Object.fromEntries(
+    agents.map(a => [a.uid, [a.firstName, a.lastName].filter(Boolean).join(" ") || a.email])
+  );
 
   const filtered = contacts.filter(c => {
     const matchType   = filter === "all" || c.type === filter;
@@ -281,18 +364,23 @@ export function Contacts() {
     { id: "partenaire",  label: "Partenaires" },
   ];
 
+  const pageTitle = "Contacts";
+  const pageSubtitle = `${contacts.length} contacts au total`;
+
   return (
     <div className="flex-1 overflow-hidden flex flex-col p-6">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-foreground">Contacts</h1>
-          <p className="text-muted-foreground text-sm mt-0.5">{contacts.length} contacts au total</p>
+          <h1 className="text-foreground">{pageTitle}</h1>
+          <p className="text-muted-foreground text-sm mt-0.5">{pageSubtitle}</p>
         </div>
-        <button onClick={() => setEditingContact({})}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white hover:opacity-90"
-          style={{ background: "var(--primary)" }}>
-          <Plus size={16} /> Nouveau contact
-        </button>
+        {canCreate && (
+          <button onClick={() => setEditingContact({})}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white hover:opacity-90"
+            style={{ background: "var(--primary)" }}>
+            <Plus size={16} /> Nouveau contact
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-3 mb-4">
@@ -301,14 +389,16 @@ export function Contacts() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher…"
             className="w-full pl-9 pr-3 py-2 border border-border rounded-xl text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
         </div>
-        <div className="flex items-center gap-1 p-1 bg-card rounded-xl border border-border">
-          {filterTabs.map(f => (
-            <button key={f.id} onClick={() => setFilter(f.id)} className="px-3 py-1.5 rounded-lg text-sm transition-all"
-              style={{ background: filter === f.id ? "var(--primary)" : "transparent", color: filter === f.id ? "white" : "var(--muted-foreground)" }}>
-              {f.label} <span className="text-xs opacity-75 ml-1">{counts[f.id]}</span>
-            </button>
-          ))}
-        </div>
+        {!isAgent && (
+          <div className="flex items-center gap-1 p-1 bg-card rounded-xl border border-border">
+            {filterTabs.map(f => (
+              <button key={f.id} onClick={() => setFilter(f.id)} className="px-3 py-1.5 rounded-lg text-sm transition-all"
+                style={{ background: filter === f.id ? "var(--primary)" : "transparent", color: filter === f.id ? "white" : "var(--muted-foreground)" }}>
+                {f.label} <span className="text-xs opacity-75 ml-1">{counts[f.id]}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto bg-card rounded-2xl border border-border">
@@ -320,7 +410,7 @@ export function Contacts() {
           <table className="w-full">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["#", "Nom", "Entreprise", "Email", "Téléphone", "Type", "Dernier contact", "CA", "Actions"].map(h => (
+                {["#", "Nom", "Entreprise", "Email", "Téléphone", "Type", "Dernier contact", "CA", "Commercial", "Actions"].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -369,21 +459,37 @@ export function Contacts() {
                     <td className="px-4 py-3 text-sm font-medium" style={{ color: c.DealValue ? "#10B981" : "var(--muted-foreground)" }}>
                       {c.DealValue ? `${Number(c.DealValue).toLocaleString("fr-FR")} DT` : "—"}
                     </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {c.assignedTo ? (
+                        <span className="flex items-center gap-1.5">
+                          <UserCheck size={12} style={{ color: "#10B981" }} />
+                          {agentNameMap[c.assignedTo] ?? "—"}
+                        </span>
+                      ) : "—"}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
-                        <button onClick={() => setEditingContact(c)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-                          <Edit2 size={13} className="text-muted-foreground" />
-                        </button>
-                        <button onClick={() => setDeleteConfirm(c)} className="p-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                          <Trash2 size={13} color="#EF4444" />
-                        </button>
+                        {isAgent ? (
+                          <button onClick={() => setViewingContact(c)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Voir les infos">
+                            <Eye size={13} className="text-muted-foreground" />
+                          </button>
+                        ) : (
+                          <>
+                            <button onClick={() => setEditingContact(c)} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+                              <Edit2 size={13} className="text-muted-foreground" />
+                            </button>
+                            <button onClick={() => setDeleteConfirm(c)} className="p-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                              <Trash2 size={13} color="#EF4444" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground text-sm">Aucun contact trouvé</td></tr>
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground text-sm">Aucun contact trouvé</td></tr>
               )}
             </tbody>
           </table>
@@ -391,9 +497,14 @@ export function Contacts() {
       </div>
 
       {editingContact !== undefined && (
-        <ContactModal contact={editingContact} saving={saving}
+        <ContactModal
+          contact={editingContact}
+          saving={saving}
+          agents={agents}
+          role={role}
           onClose={() => setEditingContact(undefined)}
-          onSave={(data) => handleSave(data, editingContact)} />
+          onSave={(data) => handleSave(data, editingContact)}
+        />
       )}
 
       {deleteConfirm && (
@@ -407,6 +518,10 @@ export function Contacts() {
             </div>
           </div>
         </div>
+      )}
+
+      {viewingContact && (
+        <ContactViewModal contact={viewingContact} onClose={() => setViewingContact(null)} />
       )}
     </div>
   );

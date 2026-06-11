@@ -5,10 +5,11 @@ import { HTML5Backend } from "react-dnd-html5-backend";
 import {
   collection, doc,
   getDocs, addDoc, updateDoc, deleteDoc,
-  Timestamp, query, orderBy
+  Timestamp, query, where
 } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import { useTheme } from "./ThemeContext";
+import { useAuth } from "../../hooks/useAuth";
 
 type Priority = "high" | "medium" | "low";
 type Column   = "todo" | "inprogress" | "review" | "done";
@@ -33,7 +34,6 @@ const PRIORITY_STYLES: Record<Priority, { label: string; color: string; bg: stri
 const ITEM_TYPE = "TASK";
 
 // ── CRUD helpers ──────────────────────────────────────────────────────────────
-const fetchTasks = ()                         => getDocs(query(collection(db, "tasks"), orderBy("createdAt", "desc")));
 const addTask    = (data: object)             => addDoc(collection(db, "tasks"), { ...data, createdAt: Timestamp.now() });
 const updateTask = (id: string, data: object) => updateDoc(doc(db, "tasks", id), { ...data, updatedAt: Timestamp.now() });
 const deleteTask = (id: string)               => deleteDoc(doc(db, "tasks", id));
@@ -223,8 +223,8 @@ function TaskModal({ task, saving, columns, onClose, onSave }: {
 // ── Main ──────────────────────────────────────────────────────────────────────
 export function Tasks() {
   const { theme } = useTheme();
+  const { user } = useAuth();
 
-  // COLUMNS defined here so "À faire" bg reacts to theme changes
   const COLUMNS: { id: Column; label: string; color: string; bg: string }[] = [
     { id: "todo",       label: "À faire",     color: "#64748B", bg: theme === "dark" ? "#1E293B" : "#F1F5F9" },
     { id: "inprogress", label: "En cours",    color: "#2563EB", bg: "#DBEAFE" },
@@ -238,28 +238,34 @@ export function Tasks() {
   const [editingTask,   setEditingTask]   = useState<Partial<Task> | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  // READ
+
+  // READ — always scoped to the logged-in user's own tasks
   useEffect(() => {
+    if (!user) return;
     (async () => {
       setLoading(true);
       try {
-        const snap = await fetchTasks();
+        const q = query(collection(db, "tasks"), where("assignee", "==", user.uid));
+        const snap = await getDocs(q);
         setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task)));
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();
-  }, []);
+  }, [user]);
 
-  // CREATE / UPDATE
+  // CREATE / UPDATE — new tasks are always assigned to the current user
   const handleSave = async (formData: Omit<Task, "id">, existingId?: string) => {
     setSaving(true);
     try {
+      const payload = existingId
+        ? formData
+        : { ...formData, assignee: user!.uid };
       if (existingId) {
-        await updateTask(existingId, formData);
-        setTasks(ts => ts.map(t => t.id === existingId ? { id: existingId, ...formData } : t));
+        await updateTask(existingId, payload);
+        setTasks(ts => ts.map(t => t.id === existingId ? { id: existingId, ...payload } : t));
       } else {
-        const ref = await addTask(formData);
-        setTasks(ts => [...ts, { id: ref.id, ...formData }]);
+        const ref = await addTask(payload);
+        setTasks(ts => [...ts, { id: ref.id, ...payload }]);
       }
       setEditingTask(undefined);
     } catch (e) { console.error(e); }

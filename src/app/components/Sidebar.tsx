@@ -1,26 +1,41 @@
 import { useState, useEffect } from "react";
-import { LayoutDashboard, CheckSquare, Users, Calendar, TrendingUp, User, ChevronRight, Building2, LogOut, Settings, AlertTriangle } from "lucide-react";
+import {
+  LayoutDashboard, CheckSquare, Users, Calendar, TrendingUp,
+  User, ChevronRight, Building2, LogOut, Settings, AlertTriangle,
+  UserCog, ClipboardList
+} from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
 import { useAuth } from "../../hooks/useAuth";
+import type { UserRole } from "../../hooks/useAuth";
+import type { Module } from "../App";
 
-type Module = "dashboard" | "tasks" | "contacts" | "calendar" | "prospects" | "profile";
+interface NavItem {
+  id: Module;
+  label: string;
+  icon: React.ElementType;
+  roles: UserRole[];
+  badge?: number;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { id: "dashboard",    label: "Tableau de bord",  icon: LayoutDashboard, roles: ["admin", "manager", "agent"] },
+  { id: "tasks",        label: "Mes tâches",        icon: CheckSquare,     roles: ["admin", "manager", "agent"] },
+  { id: "contacts",     label: "Contacts",          icon: Users,           roles: ["admin", "manager", "agent"] },
+  { id: "calendar",     label: "Calendrier",        icon: Calendar,        roles: ["admin", "manager", "agent"] },
+  { id: "prospects",    label: "Prospects",         icon: TrendingUp,      roles: ["admin", "manager", "agent"] },
+  { id: "global-tasks", label: "Tâches globales",   icon: ClipboardList,   roles: ["admin", "manager"] },
+  { id: "staff",        label: "Équipe",            icon: UserCog,         roles: ["admin", "manager"] },
+  { id: "profile",      label: "Mon profil",        icon: User,            roles: ["admin", "manager", "agent"] },
+];
 
 interface SidebarProps {
   activeModule: Module;
   onNavigate: (module: Module) => void;
   onLogout: () => void;
   onOpenSettings: () => void;
+  role: UserRole | null;
 }
-
-const navItems: { id: Module; label: string; icon: React.ElementType; badge?: number }[] = [
-  { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
-  { id: "tasks", label: "Tâches", icon: CheckSquare},
-  { id: "contacts", label: "Contacts", icon: Users },
-  { id: "calendar", label: "Calendrier", icon: Calendar },
-  { id: "prospects", label: "Prospects", icon: TrendingUp},
-  { id: "profile", label: "Mon profil", icon: User },
-];
 
 function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   return (
@@ -57,13 +72,18 @@ function LogoutConfirmModal({ onConfirm, onCancel }: { onConfirm: () => void; on
   );
 }
 
-export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings }: SidebarProps) {
+const ROLE_LABELS: Record<UserRole, string> = {
+  admin:   "Administrateur",
+  manager: "Manager",
+  agent:   "Commercial",
+};
+
+export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings, role }: SidebarProps) {
   const { user } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [jobRole, setJobRole] = useState("");
 
-  // Fetch name + jobRole from Firestore
   useEffect(() => {
     if (!user) return;
     getDoc(doc(db, "users", user.uid)).then((snap) => {
@@ -80,10 +100,11 @@ export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings }: 
     });
   }, [user]);
 
-  // Build initials from name
   const initials = displayName
     ? displayName.split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()
     : "?";
+
+  const visibleItems = NAV_ITEMS.filter(item => role && item.roles.includes(role));
 
   return (
     <>
@@ -95,7 +116,9 @@ export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings }: 
           </div>
           <div>
             <div className="text-sm font-semibold" style={{ color: "#F8FAFC" }}>CRM Arabsoft</div>
-            <div className="text-xs" style={{ color: "#475569" }}>Espace de travail</div>
+            <div className="text-xs" style={{ color: "#475569" }}>
+              {role ? ROLE_LABELS[role] : "Espace de travail"}
+            </div>
           </div>
         </div>
 
@@ -104,7 +127,7 @@ export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings }: 
           <div className="px-2 mb-3">
             <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "#334155" }}>Navigation</span>
           </div>
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeModule === item.id;
             return (
@@ -156,7 +179,7 @@ export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings }: 
             <span>Déconnexion</span>
           </button>
 
-          {/* User info — live from Firestore */}
+          {/* User info */}
           <div className="mt-3 flex items-center gap-3 px-3 py-2">
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0" style={{ background: "var(--primary)", color: "white" }}>
               {initials}
@@ -166,7 +189,7 @@ export function Sidebar({ activeModule, onNavigate, onLogout, onOpenSettings }: 
                 {displayName || "—"}
               </div>
               <div className="text-xs truncate" style={{ color: "#475569" }}>
-                {jobRole || "—"}
+                {jobRole || (role ? ROLE_LABELS[role] : "—")}
               </div>
             </div>
           </div>

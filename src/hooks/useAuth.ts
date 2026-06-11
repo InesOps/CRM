@@ -1,12 +1,15 @@
 // src/hooks/useAuth.ts
 import { useEffect, useState } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';  // ← direct import
-import { doc, getDoc, setDoc } from 'firebase/firestore';  // ← direct import
-import { auth, db } from '../firebase/config';             // ← direct import
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase/config';
+
+
+export type UserRole = 'admin' | 'manager' | 'agent';
 
 interface AuthState {
   user: User | null;
-  role: 'admin' | 'user' | null;
+  role: UserRole | null;
   loading: boolean;
 }
 
@@ -17,24 +20,39 @@ export const useAuth = (): AuthState => {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log("🔥 auth state changed:", firebaseUser?.email); // ← temp debug
-      
       if (firebaseUser) {
-        // Auto-create doc if first login
         const ref = doc(db, 'users', firebaseUser.uid);
         const snap = await getDoc(ref);
-        
+
         if (!snap.exists()) {
           await setDoc(ref, {
             email: firebaseUser.email,
-            role: 'user',
+            role: 'agent',
             createdAt: new Date()
           });
         }
 
-        const role = snap.data()?.role ?? 'user';
-        console.log("👤 role fetched:", role); // ← temp debug
-        
+        // Re-fetch to get the latest data (including newly created doc)
+        const freshSnap = await getDoc(ref);
+        const data = freshSnap.data() ?? {};
+        const rawRole = data.role ?? 'agent';
+        // Map legacy 'user' role to 'agent' for backward compatibility
+        const role = (rawRole === 'user' ? 'agent' : rawRole) as UserRole;
+
+        // Mirror profile into 'staff' so admins/managers can list all members
+        // without needing elevated rules on the restricted 'users' collection.
+        try {
+          await setDoc(doc(db, 'staff', firebaseUser.uid), {
+            email:     firebaseUser.email ?? '',
+            firstName: data.firstName ?? null,
+            lastName:  data.lastName  ?? null,
+            jobRole:   data.jobRole   ?? null,
+            role,
+          }, { merge: true });
+        } catch {
+          // Non-fatal: staff page may be empty until rules are deployed
+        }
+
         setState({ user: firebaseUser, role, loading: false });
       } else {
         setState({ user: null, role: null, loading: false });

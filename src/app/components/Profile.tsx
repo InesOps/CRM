@@ -303,12 +303,14 @@ export function Profile({ onOpenSettings }: ProfileProps) {
 
   // ── Load live stats from Firestore ────────────────────────────────────────
   useEffect(() => {
+    if (!user) return;
     (async () => {
       try {
+        const uid = user.uid;
         const [contactsSnap, prospectsSnap, tasksSnap] = await Promise.all([
-          getDocs(collection(db, "contacts")),
-          getDocs(collection(db, "prospects")),
-          getDocs(collection(db, "tasks")),
+          getDocs(query(collection(db, "contacts"),  where("assignedTo", "==", uid))),
+          getDocs(query(collection(db, "prospects"), where("assignedTo", "==", uid))),
+          getDocs(query(collection(db, "tasks"),     where("assignee",   "==", uid))),
         ]);
 
         const contacts  = contactsSnap.docs.map(d => d.data());
@@ -323,14 +325,13 @@ export function Profile({ onOpenSettings }: ProfileProps) {
         setLiveStats({ contactsManaged, dealsWon, caGenere, tasksDone });
       } catch (err) { console.error(err); }
     })();
-  }, []);
+  }, [user]);
 
   // ── Save profile ──────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!user) return;
     setSaving(true);
     try {
-      // updateDoc only — never setDoc, so we never overwrite the existing document
       await updateDoc(doc(db, "users", user.uid), {
         firstName: form.firstName,
         lastName:  form.lastName,
@@ -342,6 +343,13 @@ export function Profile({ onOpenSettings }: ProfileProps) {
         bio:       form.bio,
         timezone:  form.timezone,
         updatedAt: Timestamp.now(),
+      });
+      // Keep the staff mirror in sync (only the directory-visible fields)
+      await updateDoc(doc(db, "staff", user.uid), {
+        firstName: form.firstName,
+        lastName:  form.lastName,
+        email:     form.email,
+        jobRole:   form.role,
       });
       setProfile(form);
       setEditing(false);

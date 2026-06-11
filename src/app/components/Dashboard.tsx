@@ -4,8 +4,10 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
 import { db } from "../../firebase/config";
+import { useAuth } from "../../hooks/useAuth";
+import type { UserRole } from "../../hooks/useAuth";
 
 const PIE_COLORS = ["#2563EB", "#10B981", "#8B5CF6", "#94A3B8"];
 
@@ -18,8 +20,7 @@ const TYPE_STYLES: Record<string, { label: string; color: string; bg: string }> 
 
 const MONTHS_FR = ["Jan","Fév","Mar","Avr","Mai","Jun","Juil","Aoû","Sep","Oct","Nov","Déc"];
 
-// ── useDashboard hook ─────────────────────────────────────────────────────────
-function useDashboard() {
+function useDashboard(role: UserRole | null, userId: string | undefined) {
   const [data, setData] = useState({
     totalRevenue:    0,
     activeContacts:  0,
@@ -34,17 +35,30 @@ function useDashboard() {
       startTime: string; endTime: string;
       location: string; type: string;
     }[],
+    staffStats: [] as { name: string; contacts: number; revenue: number }[],
     loading: true,
   });
 
   useEffect(() => {
+    if (!role || !userId) return;
+
     (async () => {
       try {
-        // Fetch all data in parallel including live exchange rate
+        const today = new Date().toISOString().split("T")[0];
+
+        // For agent: filter contacts/tasks by assignedTo
+        const isAgent = role === "agent";
+
         const [contactsSnap, tasksSnap, prospectsSnap, calendarSnap, rateRes] = await Promise.all([
-          getDocs(collection(db, "contacts")),
-          getDocs(collection(db, "tasks")),
-          getDocs(collection(db, "prospects")),
+          isAgent
+            ? getDocs(query(collection(db, "contacts"), where("assignedTo", "==", userId)))
+            : getDocs(collection(db, "contacts")),
+          isAgent
+            ? getDocs(query(collection(db, "tasks"), where("assignee", "==", userId)))
+            : getDocs(collection(db, "tasks")),
+          isAgent
+            ? getDocs(query(collection(db, "prospects"), where("assignedTo", "==", userId)))
+            : getDocs(collection(db, "prospects")),
           getDocs(query(collection(db, "calendar"), orderBy("date"))),
           fetch("https://api.frankfurter.app/latest?from=EUR&to=TND").catch(() => null),
         ]);
@@ -53,10 +67,9 @@ function useDashboard() {
         const tasks     = tasksSnap.docs.map(d => d.data());
         const prospects = prospectsSnap.docs.map(d => d.data());
         const meetings  = calendarSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
-        const today     = new Date().toISOString().split("T")[0];
 
-        // ── Exchange rate TND → EUR ───────────────────────────────────────────
-        let tndToEur = 1 / 3.37; // fallback
+        // Exchange rate
+        let tndToEur = 1 / 3.37;
         if (rateRes && rateRes.ok) {
           try {
             const rateData = await rateRes.json();
@@ -65,58 +78,48 @@ function useDashboard() {
           } catch (_) {}
         }
 
-        // ── KPIs ──────────────────────────────────────────────────────────────
+        // KPIs
         const totalRevenue    = contacts.reduce((s, c) => s + (Number((c as any).DealValue) || 0), 0);
         const activeContacts  = contacts.filter(c => (c as any).status === "actif").length;
         const tasksInProgress = tasks.filter(t => (t as any).column !== "done").length;
-        const lateTasks       = tasks.filter(t => (t as any).column !== "done" && (t as any).dueDate && (t as any).dueDate < today).length;
+        const lateTasks       = tasks.filter(t =>
+          (t as any).column !== "done" && (t as any).dueDate && (t as any).dueDate < today
+        ).length;
 
-        // ── Revenue by month (from contacts createdAt) ────────────────────────
+        // Revenue by month
         const monthTotals: Record<number, number> = {};
         contacts.forEach(c => {
           const deal = Number((c as any).DealValue) || 0;
           if (!deal) return;
-          // Try to get month from createdAt timestamp
           const createdAt = (c as any).createdAt;
-          let monthIdx = new Date().getMonth(); // fallback to current month
-          if (createdAt?.toDate) {
-            monthIdx = createdAt.toDate().getMonth();
-          } else if (typeof createdAt === "string") {
-            monthIdx = new Date(createdAt).getMonth();
-          }
+          let monthIdx = new Date().getMonth();
+          if (createdAt?.toDate) monthIdx = createdAt.toDate().getMonth();
+          else if (typeof createdAt === "string") monthIdx = new Date(createdAt).getMonth();
           monthTotals[monthIdx] = (monthTotals[monthIdx] ?? 0) + deal;
         });
-        // Build array for all 12 months, only showing months with data
         const revenueByMonth = Object.entries(monthTotals)
           .map(([m, revenue]) => ({ month: MONTHS_FR[Number(m)], revenue, monthIdx: Number(m) }))
           .sort((a, b) => a.monthIdx - b.monthIdx)
           .map(({ month, revenue }) => ({ month, revenue }));
 
-        // ── Pipeline ──────────────────────────────────────────────────────────
+        // Pipeline
         const stageLabels: Record<string, string> = {
-          identification: "Prospection",
-          qualification:  "Qualif.",
-          proposition:    "Devis",
-          negociation:    "Négociation",
-          gagne:          "Gagné",
-          perdu:          "Perdu",
+          identification: "Prospection", qualification: "Qualif.",
+          proposition: "Devis", negociation: "Négociation",
+          gagne: "Gagné", perdu: "Perdu",
         };
         const stageCounts: Record<string, number> = {};
         prospects.forEach(p => {
-          const stage = (p as any).stage;
-          if (!stage) return;
-          const label = stageLabels[stage];
-          if (!label) return;
-          stageCounts[label] = (stageCounts[label] ?? 0) + 1;
+          const label = stageLabels[(p as any).stage];
+          if (label) stageCounts[label] = (stageCounts[label] ?? 0) + 1;
         });
         const pipelineByStage = Object.entries(stageCounts).map(([stage, value]) => ({ stage, value }));
 
-        // ── Contacts pie ──────────────────────────────────────────────────────
+        // Contacts pie
         const typeCounts: Record<string, number> = {};
         contacts.forEach(c => {
           const type = (c as any).type;
-          if (!type) return;
-          typeCounts[type] = (typeCounts[type] ?? 0) + 1;
+          if (type) typeCounts[type] = (typeCounts[type] ?? 0) + 1;
         });
         const typeLabels: Record<string, string> = {
           client: "Clients actifs", fournisseur: "Fournisseurs", partenaire: "Partenaires",
@@ -125,7 +128,7 @@ function useDashboard() {
           name: typeLabels[type] ?? type, value,
         }));
 
-        // ── Upcoming meetings ─────────────────────────────────────────────────
+        // Upcoming meetings
         const upcomingMeetings = meetings
           .filter((m: any) => m.date >= today)
           .sort((a: any, b: any) =>
@@ -133,22 +136,38 @@ function useDashboard() {
           )
           .slice(0, 6);
 
+        // Staff stats (admin/manager only)
+        let staffStats: { name: string; contacts: number; revenue: number }[] = [];
+        if (role !== "agent") {
+          const usersSnap = await getDocs(collection(db, "users"));
+          const allContactsSnap = await getDocs(collection(db, "contacts"));
+          const allContacts = allContactsSnap.docs.map(d => d.data() as any);
+          usersSnap.docs.forEach(d => {
+            const u = d.data() as any;
+            if (u.role === "agent") {
+              const name = [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email;
+              const assigned = allContacts.filter(c => c.assignedTo === d.id);
+              const revenue = assigned.reduce((s: number, c: any) => s + (Number(c.DealValue) || 0), 0);
+              staffStats.push({ name, contacts: assigned.length, revenue });
+            }
+          });
+        }
+
         setData({
           totalRevenue, activeContacts, tasksInProgress, lateTasks,
           tndToEur, pipelineByStage, contactsByType, revenueByMonth,
-          upcomingMeetings, loading: false,
+          upcomingMeetings, staffStats, loading: false,
         });
       } catch (e) {
         console.error(e);
         setData(d => ({ ...d, loading: false }));
       }
     })();
-  }, []);
+  }, [role, userId]);
 
   return data;
 }
 
-// ── KPI Card ──────────────────────────────────────────────────────────────────
 function KPICard({ kpi }: { kpi: { label: string; value: string; change: string; up: boolean; icon: any; color: string; bg: string } }) {
   const Icon = kpi.icon;
   return (
@@ -168,46 +187,45 @@ function KPICard({ kpi }: { kpi: { label: string; value: string; change: string;
   );
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-export function Dashboard() {
-  const stats = useDashboard();
+interface DashboardProps {
+  role: UserRole | null;
+}
+
+export function Dashboard({ role }: DashboardProps) {
+  const { user } = useAuth();
+  const stats = useDashboard(role, user?.uid);
+
+  const dashboardTitle = role === "agent"
+    ? "Mon tableau de bord"
+    : role === "admin"
+    ? "Tableau de bord global"
+    : "Tableau de bord";
+
+  const dashboardSubtitle = role === "agent"
+    ? "Vos clients et performances personnelles"
+    : "Vue globale — tous les commerciaux";
 
   const kpis = [
     {
-      label: "Chiffre d'affaires",
+      label: role === "agent" ? "Mon chiffre d'affaires" : "Chiffre d'affaires global",
       value: `${stats.totalRevenue.toLocaleString("fr-FR")} DT`,
-      change: "+12.4%",
-      up: true,
-      icon: TrendingUp,
-      color: "#2563EB",
-      bg: "#DBEAFE",
+      change: "+12.4%", up: true, icon: TrendingUp, color: "#2563EB", bg: "#DBEAFE",
     },
     {
-      label: "Contacts actifs",
+      label: role === "agent" ? "Mes clients actifs" : "Contacts actifs",
       value: `${stats.activeContacts}`,
-      change: "+8 ce mois",
-      up: true,
-      icon: Users,
-      color: "#10B981",
-      bg: "#D1FAE5",
+      change: "+8 ce mois", up: true, icon: Users, color: "#10B981", bg: "#D1FAE5",
     },
     {
-      label: "Tâches en cours",
+      label: role === "agent" ? "Mes tâches en cours" : "Tâches en cours",
       value: `${stats.tasksInProgress}`,
       change: stats.lateTasks > 0 ? `${stats.lateTasks} en retard` : "Tout à jour",
-      up: stats.lateTasks === 0,
-      icon: CheckCircle,
-      color: "#F59E0B",
-      bg: "#FEF3C7",
+      up: stats.lateTasks === 0, icon: CheckCircle, color: "#F59E0B", bg: "#FEF3C7",
     },
     {
       label: "Taux DT → EUR",
       value: stats.tndToEur > 0 ? `1 DT = ${stats.tndToEur.toFixed(4)} €` : "—",
-      change: "Taux en temps réel",
-      up: true,
-      icon: TrendingUp,
-      color: "#8B5CF6",
-      bg: "#EDE9FE",
+      change: "Taux en temps réel", up: true, icon: TrendingUp, color: "#8B5CF6", bg: "#EDE9FE",
     },
   ];
 
@@ -225,9 +243,9 @@ export function Dashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-foreground">Tableau de bord</h1>
+          <h1 className="text-foreground">{dashboardTitle}</h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — Bienvenue
+            {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {dashboardSubtitle}
           </p>
         </div>
         <select className="text-sm border border-border rounded-lg px-3 py-2 bg-card text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30">
@@ -242,9 +260,8 @@ export function Dashboard() {
         {kpis.map(kpi => <KPICard key={kpi.label} kpi={kpi} />)}
       </div>
 
-      {/* Charts row */}
+      {/* Charts */}
       <div className="grid grid-cols-3 gap-4">
-        {/* Revenue from Firestore contacts */}
         <div className="col-span-2 bg-card rounded-xl border border-border p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -282,7 +299,6 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* Contacts pie */}
         <div className="bg-card rounded-xl border border-border p-5">
           <h3 className="text-foreground mb-1">Répartition contacts</h3>
           <p className="text-xs text-muted-foreground mb-4">
@@ -318,7 +334,6 @@ export function Dashboard() {
 
       {/* Bottom row */}
       <div className="grid grid-cols-3 gap-4">
-        {/* Pipeline */}
         <div className="bg-card rounded-xl border border-border p-5">
           <h3 className="text-foreground mb-1">Pipeline commercial</h3>
           <p className="text-xs text-muted-foreground mb-4">Deals par étape</p>
@@ -341,7 +356,7 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* Mini agenda */}
+        {/* Agenda */}
         <div className="col-span-2 bg-card rounded-xl border border-border p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -359,8 +374,8 @@ export function Dashboard() {
           ) : (
             <div className="space-y-0">
               {stats.upcomingMeetings.map(m => {
-                const ts         = TYPE_STYLES[m.type] ?? TYPE_STYLES.meeting;
-                const dateObj    = new Date(m.date + "T12:00");
+                const ts      = TYPE_STYLES[m.type] ?? TYPE_STYLES.meeting;
+                const dateObj = new Date(m.date + "T12:00");
                 const isToday    = m.date === new Date().toISOString().split("T")[0];
                 const isTomorrow = m.date === new Date(Date.now() + 86400000).toISOString().split("T")[0];
                 return (
@@ -379,16 +394,8 @@ export function Dashboard() {
                         <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ background: ts.bg, color: ts.color }}>
                           {ts.label}
                         </span>
-                        {isToday && (
-                          <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ background: "#FEF3C7", color: "#F59E0B" }}>
-                            Aujourd'hui
-                          </span>
-                        )}
-                        {isTomorrow && !isToday && (
-                          <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ background: "#EDE9FE", color: "#8B5CF6" }}>
-                            Demain
-                          </span>
-                        )}
+                        {isToday && <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ background: "#FEF3C7", color: "#F59E0B" }}>Aujourd'hui</span>}
+                        {isTomorrow && !isToday && <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ background: "#EDE9FE", color: "#8B5CF6" }}>Demain</span>}
                       </div>
                       <p className="text-sm font-medium text-foreground truncate">{m.title}</p>
                       <div className="flex items-center gap-3 mt-1">
@@ -409,6 +416,34 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Staff performance (admin/manager only) */}
+      {role !== "agent" && stats.staffStats.length > 0 && (
+        <div className="bg-card rounded-xl border border-border p-5">
+          <h3 className="text-foreground mb-1">Performance des commerciaux</h3>
+          <p className="text-xs text-muted-foreground mb-4">Clients assignés et CA par agent</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Commercial</th>
+                  <th className="text-right py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Clients</th>
+                  <th className="text-right py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">CA (DT)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.staffStats.map(s => (
+                  <tr key={s.name} className="border-b border-border last:border-0">
+                    <td className="py-2.5 text-foreground">{s.name}</td>
+                    <td className="py-2.5 text-right text-muted-foreground">{s.contacts}</td>
+                    <td className="py-2.5 text-right font-medium text-foreground">{s.revenue.toLocaleString("fr-FR")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

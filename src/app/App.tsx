@@ -9,43 +9,70 @@ import { Profile } from "./components/Profile";
 import { ThemeProvider } from "./components/ThemeContext";
 import { LoginScreen } from "./components/LoginScreen";
 import { SettingsModal } from "./components/SettingsModal";
-import { useAuth } from "../hooks/useAuth";   // ← ADD
-import { logout } from "../firebase/auth";    // ← ADD
+import { StaffList } from "./components/StaffList";
+import { GlobalTasks } from "./components/GlobalTasks";
+import { useAuth } from "../hooks/useAuth";
+import { logout } from "../firebase/auth";
+import type { UserRole } from "../hooks/useAuth";
 
-type Module = "dashboard" | "tasks" | "contacts" | "calendar" | "prospects" | "profile";
+export type Module =
+  | "dashboard"
+  | "tasks"
+  | "contacts"
+  | "calendar"
+  | "prospects"
+  | "profile"
+  | "staff"
+  | "global-tasks";
+
+function getDefaultModule(role: UserRole | null): Module {
+  return "dashboard";
+}
+
+function isModuleAllowed(module: Module, role: UserRole | null): boolean {
+  if (!role) return false;
+  const allowed: Record<UserRole, Module[]> = {
+    admin:   ["dashboard", "contacts", "prospects", "calendar", "tasks", "staff", "global-tasks", "profile"],
+    manager: ["dashboard", "contacts", "prospects", "calendar", "tasks", "global-tasks", "staff", "profile"],
+    agent:   ["dashboard", "contacts", "prospects", "calendar", "tasks", "profile"],
+  };
+  return allowed[role]?.includes(module) ?? false;
+}
 
 function CRMApp() {
+  const { user, role, loading } = useAuth();
   const [activeModule, setActiveModule] = useState<Module>("dashboard");
   const [showSettings, setShowSettings] = useState(false);
-  const { user, role, loading } = useAuth();  // ← ADD
-  console.log("App state:", { user: user?.email, role, loading }); // ← ADD
 
-  // ← ADD: wait for Firebase to check auth state
-  if (loading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
-
-  // ← ADD: not logged in → show login
+  if (loading) return <div className="flex h-screen items-center justify-center">Chargement…</div>;
   if (!user) return <LoginScreen />;
 
-  // ✅ Remove the role checks for now
-const renderModule = () => {
-  switch (activeModule) {
-    case "dashboard": return <Dashboard />;
-    case "tasks":     return <Tasks />;
-    case "contacts":  return <Contacts />;
-    case "calendar":  return <CalendarView />;
-    case "prospects": return <Prospects />;
-    case "profile":   return <Profile onOpenSettings={() => setShowSettings(true)} />;
-  }
-};
+  const navigate = (module: Module) => {
+    if (isModuleAllowed(module, role)) setActiveModule(module);
+  };
+
+  const renderModule = () => {
+    if (!isModuleAllowed(activeModule, role)) return <Dashboard role={role} />;
+    switch (activeModule) {
+      case "dashboard":    return <Dashboard role={role} />;
+      case "tasks":        return <Tasks />;
+      case "contacts":     return <Contacts role={role} userId={user.uid} />;
+      case "calendar":     return <CalendarView role={role} userId={user.uid} />;
+      case "prospects":    return <Prospects role={role} userId={user.uid} />;
+      case "profile":      return <Profile onOpenSettings={() => setShowSettings(true)} />;
+      case "staff":        return <StaffList />;
+      case "global-tasks": return <GlobalTasks />;
+    }
+  };
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       <Sidebar
         activeModule={activeModule}
-        onNavigate={setActiveModule}
-        onLogout={logout}                                    // ← CHANGED: Firebase logout
+        onNavigate={navigate}
+        onLogout={logout}
         onOpenSettings={() => setShowSettings(true)}
-        role={role}                                          // ← ADD: so Sidebar hides admin links for users
+        role={role}
       />
       <main className="flex-1 overflow-hidden flex flex-col">
         {renderModule()}
