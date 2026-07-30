@@ -7,7 +7,7 @@ import {
 } from "../../firebase/crud/contacts";
 import { getAllStaff, type StaffMember } from "../../firebase/crud/users";
 import { useProjects, ProjectMultiSelect, ProjectChips, type ProjectOption } from "./ProjectPicker";
-import { ServiceMultiSelect, ServiceChips, toServiceArray } from "./ServicePicker";
+import { ServiceMultiSelect, ServiceChips, toServiceArray, SERVICE_OPTIONS, PARTNER_SERVICE_OPTIONS } from "./ServicePicker";
 import type { UserRole } from "../../hooks/useAuth";
 
 type ContactType   = "client" | "fournisseur" | "partenaire";
@@ -189,7 +189,6 @@ function ContactModal({
             <select value={type} onChange={e => setType(e.target.value as ContactType)}
               className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
               <option value="client">Client</option>
-              <option value="fournisseur">Fournisseur</option>
               <option value="partenaire">Partenaire</option>
             </select>
           </div>
@@ -232,7 +231,8 @@ function ContactModal({
 
           <div className="col-span-2">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Service</label>
-            <ServiceMultiSelect value={service} onChange={setService} />
+            <ServiceMultiSelect value={service} onChange={setService}
+              options={type === "partenaire" ? PARTNER_SERVICE_OPTIONS : SERVICE_OPTIONS} />
           </div>
 
           <div className="col-span-2">
@@ -392,7 +392,6 @@ export function Contacts({ role, userId }: ContactsProps) {
   const filterTabs: { id: ContactType | "all"; label: string }[] = [
     { id: "all",         label: "Tous" },
     { id: "client",      label: "Clients" },
-    { id: "fournisseur", label: "Fournisseurs" },
     { id: "partenaire",  label: "Partenaires" },
   ];
 

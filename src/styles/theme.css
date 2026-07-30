@@ -78,6 +78,13 @@
   --sidebar-ring: oklch(0.439 0 0);
 }
 
+/* Native date/time picker icons: keep them light in dark mode
+   (in light mode they stay the browser default dark icon). */
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

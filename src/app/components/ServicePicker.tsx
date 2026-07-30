@@ -12,6 +12,15 @@ export const SERVICE_OPTIONS = [
   "maintenance",
 ];
 
+// Services proposés pour les partenaires (liste distincte).
+export const PARTNER_SERVICE_OPTIONS = [
+  "Matériel",
+  "Technologiques",
+  "Consulting",
+  "Ingénieurie Informatique",
+  "Intégration",
+];
+
 /** Accepts legacy string values or arrays and always returns a string[]. */
 export function toServiceArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.filter(Boolean) as string[];
@@ -21,10 +30,11 @@ export function toServiceArray(v: unknown): string[] {
 
 /** Multi-select of predefined service types. */
 export function ServiceMultiSelect({
-  value, onChange,
+  value, onChange, options = SERVICE_OPTIONS,
 }: {
   value: string[];
   onChange: (services: string[]) => void;
+  options?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -61,7 +71,7 @@ export function ServiceMultiSelect({
 
       {open && (
         <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto bg-card border border-border rounded-lg shadow-xl">
-          {SERVICE_OPTIONS.map(s => {
+          {options.map(s => {
             const checked = value.includes(s);
             return (
               <button key={s} type="button" onClick={() => toggle(s)}

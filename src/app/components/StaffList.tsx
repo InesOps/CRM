@@ -476,6 +476,7 @@ export function StaffList() {
   const [deleting, setDeleting]         = useState<string | null>(null);
   const [showAdd, setShowAdd]           = useState(false);
   const [detailMember, setDetailMember] = useState<StaffMember | null>(null);
+  const [confirmMember, setConfirmMember] = useState<StaffMember | null>(null);
 
   const isAdmin   = currentUserRole === "admin";
   const isManager = currentUserRole === "manager";
@@ -508,11 +509,17 @@ export function StaffList() {
   };
 
   const handleDelete = async (uid: string) => {
-    if (!confirm("Supprimer ce membre ? Cette action est irréversible.")) return;
+    setConfirmMember(null);
     setDeleting(uid);
-    await deleteUser(uid);
-    setStaff(s => s.filter(m => m.uid !== uid));
-    setDeleting(null);
+    try {
+      await deleteUser(uid);
+      setStaff(s => s.filter(m => m.uid !== uid));
+    } catch (e: any) {
+      console.error("deleteUser error:", e);
+      setError(`Échec de la suppression (${e?.code ?? "inconnue"}). Réessayez.`);
+    } finally {
+      setDeleting(null);
+    }
   };
 
   const exportPDF = () => {
@@ -680,7 +687,7 @@ export function StaffList() {
                         </button>
                         {!isSelf && (
                           <button
-                            onClick={() => handleDelete(member.uid)}
+                            onClick={() => setConfirmMember(member)}
                             disabled={deleting === member.uid}
                             className="p-1.5 rounded-lg hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors"
                           >
@@ -719,6 +726,72 @@ export function StaffList() {
           onClose={() => setDetailMember(null)}
         />
       )}
+
+      {confirmMember && (
+        <ConfirmDeleteModal
+          member={confirmMember}
+          deleting={deleting === confirmMember.uid}
+          onCancel={() => setConfirmMember(null)}
+          onConfirm={() => handleDelete(confirmMember.uid)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ConfirmDeleteModal({ member, deleting, onCancel, onConfirm }: {
+  member: StaffMember;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const name = [member.firstName, member.lastName].filter(Boolean).join(" ") || member.email;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(15,23,42,0.55)" }}
+      onClick={onCancel}
+    >
+      <div
+        className="bg-card rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: "#FEE2E2", color: "#EF4444" }}>
+            <Trash2 size={20} />
+          </div>
+          <div>
+            <h2 className="text-foreground leading-tight">Supprimer ce membre ?</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">Cette action est irréversible.</p>
+          </div>
+        </div>
+
+        <p className="text-sm text-muted-foreground mb-6">
+          Le compte de <span className="font-medium text-foreground">{name}</span> sera
+          définitivement supprimé (authentification et données).
+        </p>
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={deleting}
+            className="px-4 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+            style={{ background: "#EF4444" }}
+          >
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            {deleting ? "Suppression…" : "Supprimer"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

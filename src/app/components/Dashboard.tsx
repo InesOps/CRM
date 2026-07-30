@@ -26,7 +26,7 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
     activeContacts:  0,
     tasksInProgress: 0,
     lateTasks:       0,
-    tndToEur:        0,
+    eurToTnd:        0,
     pipelineByStage: [] as { stage: string; value: number }[],
     contactsByType:  [] as { name: string; value: number }[],
     clientsByProject: [] as { name: string; value: number }[],
@@ -71,13 +71,13 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
         const meetings  = calendarSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
         const projects  = projectsSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name ?? "" }));
 
-        // Exchange rate
-        let tndToEur = 1 / 3.37;
+        // Exchange rate — EUR → TND (rates.TND = how many TND per 1 EUR)
+        let eurToTnd = 3.37;
         if (rateRes && rateRes.ok) {
           try {
             const rateData = await rateRes.json();
-            const eurToTnd = rateData.rates?.TND;
-            if (eurToTnd) tndToEur = 1 / eurToTnd;
+            const rate = rateData.rates?.TND;
+            if (rate) eurToTnd = rate;
           } catch (_) {}
         }
 
@@ -89,15 +89,21 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
           (t as any).column !== "done" && (t as any).dueDate && (t as any).dueDate < today
         ).length;
 
-        // Revenue by month
+        // Revenue by month — grouped by the client's last-contact month
         const monthTotals: Record<number, number> = {};
         contacts.forEach(c => {
           const deal = Number((c as any).DealValue) || 0;
           if (!deal) return;
-          const createdAt = (c as any).createdAt;
-          let monthIdx = new Date().getMonth();
-          if (createdAt?.toDate) monthIdx = createdAt.toDate().getMonth();
-          else if (typeof createdAt === "string") monthIdx = new Date(createdAt).getMonth();
+          const lastContact = (c as any).lastContact;
+          if (!lastContact) return; // no last-contact date → skip
+          let monthIdx: number;
+          if (lastContact?.toDate) {
+            monthIdx = lastContact.toDate().getMonth();
+          } else {
+            const d = new Date(`${lastContact}T12:00`);
+            if (isNaN(d.getTime())) return;
+            monthIdx = d.getMonth();
+          }
           monthTotals[monthIdx] = (monthTotals[monthIdx] ?? 0) + deal;
         });
         const revenueByMonth = Object.entries(monthTotals)
@@ -170,7 +176,7 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
 
         setData({
           totalRevenue, activeContacts, tasksInProgress, lateTasks,
-          tndToEur, pipelineByStage, contactsByType, clientsByProject, revenueByMonth,
+          eurToTnd, pipelineByStage, contactsByType, clientsByProject, revenueByMonth,
           upcomingMeetings, staffStats, loading: false,
         });
       } catch (e) {
@@ -238,8 +244,8 @@ export function Dashboard({ role }: DashboardProps) {
       up: stats.lateTasks === 0, icon: CheckCircle, color: "#F59E0B", bg: "#FEF3C7",
     },
     {
-      label: "Taux DT → EUR",
-      value: stats.tndToEur > 0 ? `1 DT = ${stats.tndToEur.toFixed(4)} €` : "—",
+      label: "Taux EUR → DT",
+      value: stats.eurToTnd > 0 ? `1 € = ${stats.eurToTnd.toFixed(4)} DT` : "—",
       change: "Taux en temps réel", up: true, icon: TrendingUp, color: "#8B5CF6", bg: "#EDE9FE",
     },
   ];

@@ -132,6 +132,45 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       const tasksDone   = tasks.filter(t => t.column === "done").length;
       const today       = new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
 
+      // ── Commercial: clients assigned to this user + revenue brought per month ─
+      const MONTHS_FR  = ["Jan","Fév","Mar","Avr","Mai","Jun","Juil","Aoû","Sep","Oct","Nov","Déc"];
+      const myContacts = contacts.filter(c => (c as any).assignedTo === user.uid);
+      const myCA       = myContacts.reduce((s, c) => s + (Number(c.DealValue) || 0), 0);
+
+      // Revenue brought per month — grouped by the client's last-contact month
+      const monthTotals: Record<number, number> = {};
+      myContacts.forEach(c => {
+        const deal = Number(c.DealValue) || 0;
+        if (!deal) return;
+        const lc = (c as any).lastContact;
+        if (!lc) return;
+        let m: number;
+        if (lc?.toDate) { m = lc.toDate().getMonth(); }
+        else { const d = new Date(`${lc}T12:00`); if (isNaN(d.getTime())) return; m = d.getMonth(); }
+        monthTotals[m] = (monthTotals[m] || 0) + deal;
+      });
+      const monthly  = Array.from({ length: 12 }, (_, i) => ({ month: MONTHS_FR[i], value: monthTotals[i] || 0 }));
+      const chartMax = Math.max(...monthly.map(m => m.value), 1);
+
+      // Inline SVG bar chart (self-contained, prints reliably)
+      const barW = 34, gap = 12, chartH = 150, baseY = 172, leftPad = 30;
+      const chartW = leftPad + monthly.length * (barW + gap);
+      const bars = monthly.map((m, i) => {
+        const h = Math.round((m.value / chartMax) * chartH);
+        const x = leftPad + i * (barW + gap);
+        const y = baseY - h;
+        const kLabel = m.value >= 1000 ? `${Math.round(m.value / 1000)}k` : `${Math.round(m.value)}`;
+        return `
+          <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="#2563eb"></rect>
+          <text x="${x + barW / 2}" y="${baseY + 14}" font-size="10" text-anchor="middle" fill="#64748b">${m.month}</text>
+          ${m.value > 0 ? `<text x="${x + barW / 2}" y="${y - 4}" font-size="9" text-anchor="middle" fill="#1e293b">${kLabel}</text>` : ""}`;
+      }).join("");
+      const chartSvg = `
+        <svg width="${chartW}" height="${baseY + 22}" viewBox="0 0 ${chartW} ${baseY + 22}" style="max-width:100%">
+          <line x1="${leftPad}" y1="${baseY}" x2="${chartW}" y2="${baseY}" stroke="#e2e8f0" stroke-width="1"></line>
+          ${bars}
+        </svg>`;
+
       // Build HTML for the PDF
       const html = `
         <html><head><meta charset="utf-8">
@@ -161,6 +200,26 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           <div class="kpi"><div class="kpi-val">${totalCA.toLocaleString("fr-FR")} DT</div><div class="kpi-lbl">CA total</div></div>
           <div class="kpi"><div class="kpi-val">${tasksDone}</div><div class="kpi-lbl">Tâches terminées</div></div>
         </div>
+
+        <h2>Mon chiffre d'affaires par mois</h2>
+        <p style="color:#64748b;font-size:12px;margin:0 0 10px;">CA rapporté par mois — total ${myCA.toLocaleString("fr-FR")} DT sur ${myContacts.length} client(s) assigné(s)</p>
+        ${chartSvg}
+
+        <h2>Mes clients assignés (${myContacts.length})</h2>
+        <table>
+          <tr><th>#</th><th>Nom</th><th>Entreprise</th><th>Email</th><th>Téléphone</th><th>Service</th><th>CA</th><th>Dernier contact</th></tr>
+          ${myContacts.length ? myContacts.map((c, i) => `
+            <tr>
+              <td>${c.contactId ?? i+1}</td>
+              <td>${c.Name ?? ""} ${c.Lastname ?? ""}</td>
+              <td>${c.Company ?? "—"}</td>
+              <td>${c.Email ?? "—"}</td>
+              <td>${c.Phone ?? "—"}</td>
+              <td>${Array.isArray(c.service) ? (c.service.join(", ") || "—") : (c.service ?? "—")}</td>
+              <td>${c.DealValue ? Number(c.DealValue).toLocaleString("fr-FR") + " DT" : "—"}</td>
+              <td>${c.lastContact ?? "—"}</td>
+            </tr>`).join("") : `<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Aucun client assigné</td></tr>`}
+        </table>
 
         <h2>Contacts (${contacts.length})</h2>
         <table>

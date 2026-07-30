@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { ChevronLeft, ChevronRight, Plus, Clock, Users, MapPin, X, Check, Trash2, Pencil, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, Clock, Users, MapPin, X, Check, Trash2, Pencil, Loader2 } from "lucide-react";
 import {
   getCalendarEvents, addCalendarEvent, updateCalendarEvent, deleteCalendarEvent,
 } from "../../firebase/crud/calendar";
@@ -50,33 +50,40 @@ function MeetingModal({ meeting, saving, onClose, onSave, staff }: {
   onSave: (m: Omit<Meeting, "id">, existingId?: string) => void;
   staff: StaffMember[];
 }) {
-  const [form, setForm]             = useState<Partial<Meeting>>(meeting);
-  const [selectedStaff, setSelectedStaff] = useState<string[]>(() => {
-    if (meeting.participants && meeting.type === "internal") {
-      return meeting.participants.split(",").map(s => s.trim()).filter(Boolean);
-    }
-    return [];
-  });
-
-  const set = (k: keyof Meeting, v: any) => setForm(f => ({ ...f, [k]: v }));
-  const canSave = !!form.title?.trim() && !!form.date;
-  const isInternal = form.type === "internal";
-
-  const toggleStaff = (uid: string) => {
-    setSelectedStaff(prev =>
-      prev.includes(uid) ? prev.filter(x => x !== uid) : [...prev, uid]
-    );
-  };
+  const [form, setForm] = useState<Partial<Meeting>>(meeting);
 
   const getStaffName = (member: StaffMember) =>
     [member.firstName, member.lastName].filter(Boolean).join(" ") || member.email;
 
-  const participantsValue = isInternal
-    ? selectedStaff.map(uid => {
-        const m = staff.find(s => s.uid === uid);
-        return m ? getStaffName(m) : uid;
-      }).join(", ")
-    : form.participants ?? "";
+  // All members except admins
+  const selectableStaff = staff.filter(m => m.role !== "admin");
+
+  const [selectedStaff, setSelectedStaff] = useState<string[]>(() => {
+    if (!meeting.participants) return [];
+    const names = meeting.participants.split(",").map(s => s.trim()).filter(Boolean);
+    return staff.filter(m => names.includes(getStaffName(m))).map(m => m.uid);
+  });
+
+  // Participants dropdown open/close
+  const [staffOpen, setStaffOpen] = useState(false);
+  const staffRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (staffRef.current && !staffRef.current.contains(e.target as Node)) setStaffOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const set = (k: keyof Meeting, v: any) => setForm(f => ({ ...f, [k]: v }));
+  const canSave = !!form.title?.trim() && !!form.date;
+
+  const toggleStaff = (uid: string) =>
+    setSelectedStaff(prev => prev.includes(uid) ? prev.filter(x => x !== uid) : [...prev, uid]);
+
+  const participantsValue = selectedStaff
+    .map(uid => { const m = staff.find(s => s.uid === uid); return m ? getStaffName(m) : uid; })
+    .join(", ");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(15,23,42,0.5)" }}>
@@ -127,33 +134,53 @@ function MeetingModal({ meeting, saving, onClose, onSave, staff }: {
             </div>
           </div>
 
-          {/* Participants: staff checklist for internal, free text otherwise */}
+          {/* Participants: dropdown multi-select of team members (admins excluded) */}
           <div>
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Participants{isInternal ? " (membres de l'équipe)" : ""}
-            </label>
-            {isInternal && staff.length > 0 ? (
-              <div className="mt-1 border border-border rounded-lg bg-background max-h-36 overflow-y-auto divide-y divide-border">
-                {staff.map(member => (
-                  <label key={member.uid} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={selectedStaff.includes(member.uid)}
-                      onChange={() => toggleStaff(member.uid)}
-                      className="w-3.5 h-3.5 rounded accent-primary"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-sm text-foreground truncate">{getStaffName(member)}</p>
-                      <p className="text-xs text-muted-foreground truncate">{member.email}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <input value={form.participants || ""} onChange={e => set("participants", e.target.value)}
-                placeholder="Noms des participants…"
-                className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
-            )}
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Participants</label>
+            <div className="relative mt-1" ref={staffRef}>
+              <button type="button" onClick={() => setStaffOpen(o => !o)}
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <span className="flex flex-wrap gap-1.5 items-center min-h-[1.25rem] text-left">
+                  {selectedStaff.length === 0
+                    ? <span className="text-muted-foreground">Sélectionner des membres…</span>
+                    : selectedStaff.map(uid => {
+                        const m = staff.find(s => s.uid === uid);
+                        const name = m ? getStaffName(m) : uid;
+                        return (
+                          <span key={uid} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-border">
+                            {name}
+                            <span onClick={e => { e.stopPropagation(); toggleStaff(uid); }} className="text-muted-foreground hover:text-red-400">
+                              <X size={10} />
+                            </span>
+                          </span>
+                        );
+                      })}
+                </span>
+                <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+              </button>
+              {staffOpen && (
+                <div className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto bg-card border border-border rounded-lg shadow-xl">
+                  {selectableStaff.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-muted-foreground">Aucun membre disponible.</div>
+                  ) : selectableStaff.map(member => {
+                    const checked = selectedStaff.includes(member.uid);
+                    return (
+                      <button key={member.uid} type="button" onClick={() => toggleStaff(member.uid)}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-muted transition-colors">
+                        <span className="w-4 h-4 rounded border flex items-center justify-center shrink-0"
+                          style={{ background: checked ? "var(--primary)" : "transparent", borderColor: checked ? "var(--primary)" : "var(--border)" }}>
+                          {checked && <Check size={11} color="white" />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-sm text-foreground truncate">{getStaffName(member)}</span>
+                          <span className="block text-xs text-muted-foreground truncate">{member.email}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           <div>

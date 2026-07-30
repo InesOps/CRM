@@ -249,7 +249,7 @@ interface ProfileProps {
 }
 
 export function Profile({ onOpenSettings }: ProfileProps) {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { theme } = useTheme();
 
   const [profile,         setProfile]         = useState<ProfileData>(emptyProfile);
@@ -515,13 +515,28 @@ export function Profile({ onOpenSettings }: ProfileProps) {
                   { label: "Entreprise",     field: "company"   },
                   { label: "Localisation",   field: "location"  },
                   { label: "Fuseau horaire", field: "timezone"  },
-                ] as { label: string; field: keyof ProfileData }[]).map(({ label, field }) => (
-                  <div key={field}>
-                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</label>
-                    <input value={form[field]} onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-                      className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
-                  </div>
-                ))}
+                ] as { label: string; field: keyof ProfileData }[]).map(({ label, field }) => {
+                  const emailLocked = field === "email" && role !== "admin";
+                  return (
+                    <div key={field}>
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</label>
+                      <input
+                        value={form[field]}
+                        onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+                        disabled={emailLocked}
+                        readOnly={emailLocked}
+                        tabIndex={emailLocked ? -1 : undefined}
+                        title={emailLocked ? "Seul un administrateur peut modifier l'email" : undefined}
+                        className={`w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 ${emailLocked ? "bg-muted opacity-60 cursor-not-allowed select-none pointer-events-none" : "bg-background"}`}
+                      />
+                      {emailLocked && (
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          <Lock size={10} /> Seul un administrateur peut modifier l'email
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
                 <div className="col-span-2">
                   <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bio</label>
                   <textarea value={form.bio} onChange={e => setForm(f => ({ ...f, bio: e.target.value }))}

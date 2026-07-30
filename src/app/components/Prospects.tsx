@@ -204,7 +204,7 @@ function ProspectModal({
   );
 }
 
-function ProspectViewModal({ prospect, projectNames, onClose }: { prospect: Prospect; projectNames: string[]; onClose: () => void }) {
+function ProspectViewModal({ prospect, projectNames, onClose, onConvert }: { prospect: Prospect; projectNames: string[]; onClose: () => void; onConvert?: () => void }) {
   const st       = STAGES.find(s => s.id === prospect.stage) ?? STAGES[0];
   const initials = `${prospect.Name?.[0] ?? ""}${prospect.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
 
@@ -262,7 +262,15 @@ function ProspectViewModal({ prospect, projectNames, onClose }: { prospect: Pros
           </div>
         )}
 
-        <button onClick={onClose} className="w-full mt-5 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">
+        {onConvert && prospect.stage === "gagne" && (
+          <button onClick={onConvert}
+            className="w-full mt-5 px-4 py-2.5 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-90"
+            style={{ background: "#10B981" }}>
+            <ArrowUpCircle size={15} /> Convertir en client
+          </button>
+        )}
+
+        <button onClick={onClose} className="w-full mt-3 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">
           Fermer
         </button>
       </div>
@@ -281,6 +289,7 @@ export function Prospects({ role, userId }: ProspectsProps) {
   const { projects, nameOf } = useProjects();
   const [editingProspect, setEditingProspect] = useState<Partial<Prospect> | undefined>(undefined);
   const [deleteConfirm,   setDeleteConfirm]   = useState<Prospect | null>(null);
+  const [convertConfirm,  setConvertConfirm]  = useState<Prospect | null>(null);
   const [viewingProspect, setViewingProspect] = useState<Prospect | null>(null);
 
   const isAgent = role === "agent";
@@ -337,7 +346,6 @@ export function Prospects({ role, userId }: ProspectsProps) {
   };
 
   const convertToClient = async (p: Prospect) => {
-    if (!confirm(`Convertir "${p.Name} ${p.Lastname}" en client ?`)) return;
     setConverting(p.id);
     try {
       const contactId = await getNextContactId();
@@ -361,6 +369,13 @@ export function Prospects({ role, userId }: ProspectsProps) {
       setProspects(ps => ps.filter(x => x.id !== p.id));
     } catch (e) { console.error(e); }
     finally { setConverting(null); }
+  };
+
+  const handleConfirmConvert = async () => {
+    if (!convertConfirm) return;
+    await convertToClient(convertConfirm);
+    setConvertConfirm(null);
+    setViewingProspect(null);
   };
 
   const handleDelete = async (prospect: Prospect) => {
@@ -446,7 +461,7 @@ export function Prospects({ role, userId }: ProspectsProps) {
           filtered.map(p => {
             const st = STAGES.find(s => s.id === p.stage)!;
             const canAdvance  = p.stage !== "gagne" && p.stage !== "perdu";
-            const canConvert  = p.stage !== "perdu";
+            const canConvert  = p.stage === "gagne";
             const fullName    = `${p.Name ?? ""} ${p.Lastname ?? ""}`.trim();
             const initials    = `${p.Name?.[0] ?? ""}${p.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
             const assigneeName = p.assignedTo ? (agentNameMap[p.assignedTo] ?? p.assignee) : p.assignee;
@@ -513,15 +528,12 @@ export function Prospects({ role, userId }: ProspectsProps) {
                             </button>
                             {canConvert && (
                               <button
-                                onClick={() => convertToClient(p)}
-                                disabled={converting === p.id}
+                                onClick={() => setConvertConfirm(p)}
                                 className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:opacity-90"
                                 style={{ background: "#D1FAE5", color: "#10B981" }}
                                 title="Convertir en client"
                               >
-                                {converting === p.id
-                                  ? <Loader2 size={11} className="animate-spin" />
-                                  : <ArrowUpCircle size={11} />}
+                                <ArrowUpCircle size={11} />
                                 Client
                               </button>
                             )}
@@ -575,11 +587,36 @@ export function Prospects({ role, userId }: ProspectsProps) {
         </div>
       )}
 
+      {convertConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center" style={{ background: "rgba(15,23,42,0.55)" }}>
+          <div className="bg-card rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <h2 className="text-foreground mb-2">Convertir en client</h2>
+            <p className="text-sm text-muted-foreground mb-5">
+              Confirmez-vous la conversion de <strong className="text-foreground">{convertConfirm.Name} {convertConfirm.Lastname}</strong> en client ?
+              Le prospect sera déplacé vers les contacts (clients) et retiré de la liste des prospects.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConvertConfirm(null)} disabled={converting === convertConfirm.id}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted disabled:opacity-60">
+                Annuler
+              </button>
+              <button onClick={handleConfirmConvert} disabled={converting === convertConfirm.id}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
+                style={{ background: "#10B981" }}>
+                {converting === convertConfirm.id ? <Loader2 size={14} className="animate-spin" /> : <ArrowUpCircle size={14} />}
+                {converting === convertConfirm.id ? "Conversion…" : "Convertir"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {viewingProspect && (
         <ProspectViewModal
           prospect={viewingProspect}
           projectNames={(viewingProspect.projectIds ?? []).map(nameOf).filter(Boolean)}
           onClose={() => setViewingProspect(null)}
+          onConvert={!isAgent ? () => setConvertConfirm(viewingProspect) : undefined}
         />
       )}
     </div>
