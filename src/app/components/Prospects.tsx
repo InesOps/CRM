@@ -6,6 +6,8 @@ import { addProspect, updateProspect, deleteProspect } from "../../firebase/crud
 import { getNextContactId, addContact } from "../../firebase/crud/contacts";
 
 import { getAgents, type StaffMember } from "../../firebase/crud/users";
+import { useProjects, ProjectMultiSelect, ProjectChips, type ProjectOption } from "./ProjectPicker";
+import { ServiceMultiSelect, ServiceChips, toServiceArray } from "./ServicePicker";
 import type { UserRole } from "../../hooks/useAuth";
 
 type Stage = "identification" | "qualification" | "proposition" | "negociation" | "gagne" | "perdu";
@@ -26,8 +28,10 @@ interface Prospect {
   nextAction: string;
   nextActionDate: string;
   source: string;
+  service: string[];
   notes: string;
   type: "prospect";
+  projectIds?: string[];
 }
 
 interface ProspectsProps {
@@ -48,11 +52,11 @@ const emptyForm = (userId: string): Partial<Prospect> => ({
   Name: "", Lastname: "", company: "", email: "", phone: "",
   stage: "identification", value: 0, probability: 20,
   assignee: "", assignedTo: userId, nextAction: "", nextActionDate: "",
-  source: "", notes: "", type: "prospect",
+  source: "", service: [], notes: "", type: "prospect", projectIds: [],
 });
 
 function ProspectModal({
-  prospect, saving, onClose, onSave, agents, role,
+  prospect, saving, onClose, onSave, agents, role, projects,
 }: {
   prospect: Partial<Prospect>;
   saving: boolean;
@@ -60,6 +64,7 @@ function ProspectModal({
   onSave: (p: Omit<Prospect, "id" | "prospectId">) => void;
   agents: StaffMember[];
   role: UserRole | null;
+  projects: ProjectOption[];
 }) {
   const [form, setForm] = useState<Partial<Prospect>>(prospect);
   const set = (k: keyof Prospect, v: any) => setForm(f => ({ ...f, [k]: v }));
@@ -113,6 +118,10 @@ function ProspectModal({
               placeholder="LinkedIn, Salon, Recommandation…"
               className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
+          <div className="col-span-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Service</label>
+            <ServiceMultiSelect value={toServiceArray(form.service)} onChange={ids => set("service", ids)} />
+          </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Valeur (DT)</label>
             <input type="number" value={form.value || ""} onChange={e => set("value", Number(e.target.value))}
@@ -157,6 +166,10 @@ function ProspectModal({
               className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
           <div className="col-span-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Projets</label>
+            <ProjectMultiSelect projects={projects} value={form.projectIds ?? []} onChange={ids => set("projectIds", ids)} />
+          </div>
+          <div className="col-span-2">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Notes</label>
             <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)}
               className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none" rows={2} />
@@ -175,7 +188,8 @@ function ProspectModal({
               value: form.value ?? 0, probability: form.probability ?? 20,
               assignee: form.assignee ?? "", assignedTo: form.assignedTo ?? undefined,
               nextAction: form.nextAction ?? "", nextActionDate: form.nextActionDate ?? "",
-              source: form.source ?? "", notes: form.notes ?? "", type: "prospect",
+              source: form.source ?? "", service: toServiceArray(form.service), notes: form.notes ?? "", type: "prospect",
+              projectIds: form.projectIds ?? [],
             })}
             disabled={saving || !canSave}
             className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
@@ -190,7 +204,7 @@ function ProspectModal({
   );
 }
 
-function ProspectViewModal({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
+function ProspectViewModal({ prospect, projectNames, onClose }: { prospect: Prospect; projectNames: string[]; onClose: () => void }) {
   const st       = STAGES.find(s => s.id === prospect.stage) ?? STAGES[0];
   const initials = `${prospect.Name?.[0] ?? ""}${prospect.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
 
@@ -231,6 +245,16 @@ function ProspectViewModal({ prospect, onClose }: { prospect: Prospect; onClose:
           ))}
         </div>
 
+        <div className="mt-3 bg-muted/40 rounded-xl p-3">
+          <p className="text-xs text-muted-foreground mb-2">Service</p>
+          <ServiceChips services={toServiceArray(prospect.service)} />
+        </div>
+
+        <div className="mt-3 bg-muted/40 rounded-xl p-3">
+          <p className="text-xs text-muted-foreground mb-2">Projets</p>
+          <ProjectChips names={projectNames} />
+        </div>
+
         {prospect.notes && (
           <div className="mt-3 bg-muted/40 rounded-xl p-3">
             <p className="text-xs text-muted-foreground mb-1">Notes</p>
@@ -253,6 +277,8 @@ export function Prospects({ role, userId }: ProspectsProps) {
   const [saving,          setSaving]          = useState(false);
   const [converting,      setConverting]      = useState<string | null>(null);
   const [stageFilter,     setStageFilter]     = useState<Stage | "all">("all");
+  const [projectFilter,   setProjectFilter]   = useState<string>("all");
+  const { projects, nameOf } = useProjects();
   const [editingProspect, setEditingProspect] = useState<Partial<Prospect> | undefined>(undefined);
   const [deleteConfirm,   setDeleteConfirm]   = useState<Prospect | null>(null);
   const [viewingProspect, setViewingProspect] = useState<Prospect | null>(null);
@@ -328,6 +354,8 @@ export function Prospects({ role, userId }: ProspectsProps) {
         tags:        [],
         DealValue:   p.value || undefined,
         assignedTo:  p.assignedTo || userId,
+        service:     toServiceArray(p.service),
+        projectIds:  p.projectIds ?? [],
       });
       await deleteProspect(p.id);
       setProspects(ps => ps.filter(x => x.id !== p.id));
@@ -343,7 +371,10 @@ export function Prospects({ role, userId }: ProspectsProps) {
     finally { setDeleteConfirm(null); }
   };
 
-  const filtered = prospects.filter(p => stageFilter === "all" || p.stage === stageFilter);
+  const filtered = prospects.filter(p =>
+    (stageFilter === "all" || p.stage === stageFilter) &&
+    (projectFilter === "all" || (p.projectIds ?? []).includes(projectFilter))
+  );
 
   const totalPipeline    = prospects.filter(p => p.stage !== "perdu").reduce((s, p) => s + (p.value ?? 0), 0);
   const weightedPipeline = prospects.filter(p => p.stage !== "perdu").reduce((s, p) => s + (p.value ?? 0) * (p.probability ?? 0) / 100, 0);
@@ -396,6 +427,11 @@ export function Prospects({ role, userId }: ProspectsProps) {
             </button>
           );
         })}
+        <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}
+          className="ml-auto px-3 py-1.5 border border-border rounded-lg text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+          <option value="all">Tous les projets</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
       </div>
 
       {/* List */}
@@ -434,6 +470,11 @@ export function Prospects({ role, userId }: ProspectsProps) {
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">{p.company}{p.source ? ` · Source: ${p.source}` : ""}</p>
+                        {(p.projectIds ?? []).length > 0 && (
+                          <div className="mt-1.5">
+                            <ProjectChips names={(p.projectIds ?? []).map(nameOf).filter(Boolean)} />
+                          </div>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-sm font-semibold text-foreground">{(p.value ?? 0).toLocaleString("fr-FR")} DT</p>
@@ -467,6 +508,9 @@ export function Prospects({ role, userId }: ProspectsProps) {
                           </button>
                         ) : (
                           <>
+                            <button onClick={() => setViewingProspect(p)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Voir les infos">
+                              <Eye size={12} className="text-muted-foreground" />
+                            </button>
                             {canConvert && (
                               <button
                                 onClick={() => convertToClient(p)}
@@ -512,6 +556,7 @@ export function Prospects({ role, userId }: ProspectsProps) {
           saving={saving}
           agents={agents}
           role={role}
+          projects={projects}
           onClose={() => setEditingProspect(undefined)}
           onSave={(data) => handleSave(data, editingProspect)}
         />
@@ -531,7 +576,11 @@ export function Prospects({ role, userId }: ProspectsProps) {
       )}
 
       {viewingProspect && (
-        <ProspectViewModal prospect={viewingProspect} onClose={() => setViewingProspect(null)} />
+        <ProspectViewModal
+          prospect={viewingProspect}
+          projectNames={(viewingProspect.projectIds ?? []).map(nameOf).filter(Boolean)}
+          onClose={() => setViewingProspect(null)}
+        />
       )}
     </div>
   );

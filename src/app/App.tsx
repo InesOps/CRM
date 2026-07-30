@@ -5,6 +5,7 @@ import { Tasks } from "./components/Tasks";
 import { Contacts } from "./components/Contacts";
 import { CalendarView } from "./components/CalendarView";
 import { Prospects } from "./components/Prospects";
+import { Projects } from "./components/Projects";
 import { Profile } from "./components/Profile";
 import { ThemeProvider } from "./components/ThemeContext";
 import { LoginScreen } from "./components/LoginScreen";
@@ -21,6 +22,7 @@ export type Module =
   | "contacts"
   | "calendar"
   | "prospects"
+  | "projects"
   | "profile"
   | "staff"
   | "global-tasks";
@@ -32,8 +34,8 @@ function getDefaultModule(role: UserRole | null): Module {
 function isModuleAllowed(module: Module, role: UserRole | null): boolean {
   if (!role) return false;
   const allowed: Record<UserRole, Module[]> = {
-    admin:   ["dashboard", "contacts", "prospects", "calendar", "tasks", "staff", "global-tasks", "profile"],
-    manager: ["dashboard", "contacts", "prospects", "calendar", "tasks", "global-tasks", "staff", "profile"],
+    admin:   ["dashboard", "contacts", "prospects", "projects", "calendar", "tasks", "staff", "global-tasks", "profile"],
+    manager: ["dashboard", "contacts", "prospects", "projects", "calendar", "tasks", "global-tasks", "staff", "profile"],
     agent:   ["dashboard", "contacts", "prospects", "calendar", "tasks", "profile"],
   };
   return allowed[role]?.includes(module) ?? false;
@@ -59,6 +61,7 @@ function CRMApp() {
       case "contacts":     return <Contacts role={role} userId={user.uid} />;
       case "calendar":     return <CalendarView role={role} userId={user.uid} />;
       case "prospects":    return <Prospects role={role} userId={user.uid} />;
+      case "projects":     return <Projects role={role} />;
       case "profile":      return <Profile onOpenSettings={() => setShowSettings(true)} />;
       case "staff":        return <StaffList />;
       case "global-tasks": return <GlobalTasks />;

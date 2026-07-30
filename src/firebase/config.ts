@@ -2,6 +2,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyCCBBrLI_2F_brolDYDb46Rn2b9zMkVqLo",
@@ -16,3 +17,5 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 
 export const auth = getAuth(app);
 export const db   = getFirestore(app);
+// Match the region your functions are deployed to (default: us-central1).
+export const functions = getFunctions(app);

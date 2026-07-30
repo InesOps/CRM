@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import {
   LayoutDashboard, CheckSquare, Users, Calendar, TrendingUp,
   User, ChevronRight, Building2, LogOut, Settings, AlertTriangle,
-  UserCog, ClipboardList
+  UserCog, ClipboardList, FolderKanban
 } from "lucide-react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase/config";
@@ -21,9 +21,10 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard",    label: "Tableau de bord",  icon: LayoutDashboard, roles: ["admin", "manager", "agent"] },
   { id: "tasks",        label: "Mes tâches",        icon: CheckSquare,     roles: ["admin", "manager", "agent"] },
-  { id: "contacts",     label: "Contacts",          icon: Users,           roles: ["admin", "manager", "agent"] },
   { id: "calendar",     label: "Calendrier",        icon: Calendar,        roles: ["admin", "manager", "agent"] },
+  { id: "contacts",     label: "Contacts",          icon: Users,           roles: ["admin", "manager", "agent"] },
   { id: "prospects",    label: "Prospects",         icon: TrendingUp,      roles: ["admin", "manager", "agent"] },
+  { id: "projects",     label: "Projets",           icon: FolderKanban,    roles: ["admin", "manager"] },
   { id: "global-tasks", label: "Tâches globales",   icon: ClipboardList,   roles: ["admin", "manager"] },
   { id: "staff",        label: "Équipe",            icon: UserCog,         roles: ["admin", "manager"] },
   { id: "profile",      label: "Mon profil",        icon: User,            roles: ["admin", "manager", "agent"] },

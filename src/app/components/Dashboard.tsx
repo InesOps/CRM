@@ -29,6 +29,7 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
     tndToEur:        0,
     pipelineByStage: [] as { stage: string; value: number }[],
     contactsByType:  [] as { name: string; value: number }[],
+    clientsByProject: [] as { name: string; value: number }[],
     revenueByMonth:  [] as { month: string; revenue: number }[],
     upcomingMeetings: [] as {
       id: string; title: string; date: string;
@@ -49,7 +50,7 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
         // For agent: filter contacts/tasks by assignedTo
         const isAgent = role === "agent";
 
-        const [contactsSnap, tasksSnap, prospectsSnap, calendarSnap, rateRes] = await Promise.all([
+        const [contactsSnap, tasksSnap, prospectsSnap, calendarSnap, projectsSnap, rateRes] = await Promise.all([
           isAgent
             ? getDocs(query(collection(db, "contacts"), where("assignedTo", "==", userId)))
             : getDocs(collection(db, "contacts")),
@@ -60,6 +61,7 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
             ? getDocs(query(collection(db, "prospects"), where("assignedTo", "==", userId)))
             : getDocs(collection(db, "prospects")),
           getDocs(query(collection(db, "calendar"), orderBy("date"))),
+          getDocs(collection(db, "projets")),
           fetch("https://api.frankfurter.app/latest?from=EUR&to=TND").catch(() => null),
         ]);
 
@@ -67,6 +69,7 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
         const tasks     = tasksSnap.docs.map(d => d.data());
         const prospects = prospectsSnap.docs.map(d => d.data());
         const meetings  = calendarSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        const projects  = projectsSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name ?? "" }));
 
         // Exchange rate
         let tndToEur = 1 / 3.37;
@@ -128,6 +131,18 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
           name: typeLabels[type] ?? type, value,
         }));
 
+        // Clients par projet
+        const projectCounts: Record<string, number> = {};
+        contacts.forEach(c => {
+          if ((c as any).type !== "client") return;
+          ((c as any).projectIds ?? []).forEach((pid: string) => {
+            projectCounts[pid] = (projectCounts[pid] ?? 0) + 1;
+          });
+        });
+        const clientsByProject = projects
+          .map(p => ({ name: p.name, value: projectCounts[p.id] ?? 0 }))
+          .sort((a, b) => b.value - a.value);
+
         // Upcoming meetings
         const upcomingMeetings = meetings
           .filter((m: any) => m.date >= today)
@@ -155,7 +170,7 @@ function useDashboard(role: UserRole | null, userId: string | undefined) {
 
         setData({
           totalRevenue, activeContacts, tasksInProgress, lateTasks,
-          tndToEur, pipelineByStage, contactsByType, revenueByMonth,
+          tndToEur, pipelineByStage, contactsByType, clientsByProject, revenueByMonth,
           upcomingMeetings, staffStats, loading: false,
         });
       } catch (e) {
@@ -356,17 +371,51 @@ export function Dashboard({ role }: DashboardProps) {
           )}
         </div>
 
-        {/* Agenda */}
+        {/* Clients par projet */}
         <div className="col-span-2 bg-card rounded-xl border border-border p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-foreground">Agenda à venir</h3>
-              <p className="text-xs text-muted-foreground">Prochains rendez-vous</p>
+              <h3 className="text-foreground">Clients par projet</h3>
+              <p className="text-xs text-muted-foreground">Nombre de clients rattachés à chaque projet</p>
             </div>
-            <Calendar size={16} className="text-muted-foreground" />
+            <span className="text-xs font-semibold px-2 py-1 rounded-lg" style={{ background: "#EDE9FE", color: "#8B5CF6" }}>
+              {stats.clientsByProject.length} projets
+            </span>
           </div>
+          {stats.clientsByProject.length > 0 ? (
+            (() => {
+              const maxVal = Math.max(...stats.clientsByProject.map(p => p.value), 1);
+              return (
+                <div className="space-y-3">
+                  {stats.clientsByProject.map(p => (
+                    <div key={p.name} className="flex items-center gap-3">
+                      <span className="text-sm text-foreground w-40 shrink-0 truncate" title={p.name}>{p.name}</span>
+                      <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all"
+                          style={{ width: `${(p.value / maxVal) * 100}%`, background: "#8B5CF6" }} />
+                      </div>
+                      <span className="text-sm font-medium text-foreground w-8 text-right shrink-0">{p.value}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">Aucun projet enregistré</p>
+          )}
+        </div>
+      </div>
 
-          {stats.upcomingMeetings.length === 0 ? (
+      {/* Rendez-vous à venir */}
+      <div className="bg-card rounded-xl border border-border p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-foreground">Rendez-vous à venir</h3>
+          </div>
+          <Calendar size={16} className="text-muted-foreground" />
+        </div>
+
+        {stats.upcomingMeetings.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground">
               <Calendar size={24} className="opacity-30" />
               <p className="text-sm">Aucun rendez-vous à venir</p>
@@ -415,7 +464,6 @@ export function Dashboard({ role }: DashboardProps) {
             </div>
           )}
         </div>
-      </div>
 
       {/* Staff performance (admin/manager only) */}
       {role !== "agent" && stats.staffStats.length > 0 && (

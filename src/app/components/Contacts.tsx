@@ -6,6 +6,8 @@ import {
   getNextContactId, addContact, updateContact, deleteContact,
 } from "../../firebase/crud/contacts";
 import { getAllStaff, type StaffMember } from "../../firebase/crud/users";
+import { useProjects, ProjectMultiSelect, ProjectChips, type ProjectOption } from "./ProjectPicker";
+import { ServiceMultiSelect, ServiceChips, toServiceArray } from "./ServicePicker";
 import type { UserRole } from "../../hooks/useAuth";
 
 type ContactType   = "client" | "fournisseur" | "partenaire";
@@ -23,8 +25,10 @@ interface Contact {
   status: ContactStatus;
   lastContact: string;
   tags: string[];
+  service?: string[];
   DealValue?: number;
   assignedTo?: string;
+  projectIds?: string[];
 }
 
 interface ContactsProps {
@@ -38,7 +42,7 @@ const TYPE_STYLES: Record<ContactType, { label: string; color: string; bg: strin
   partenaire:  { label: "Partenaire",  color: "#10B981", bg: "#D1FAE5" },
 };
 
-function ContactViewModal({ contact, onClose }: { contact: Contact; onClose: () => void }) {
+function ContactViewModal({ contact, projectNames, onClose }: { contact: Contact; projectNames: string[]; onClose: () => void }) {
   const ts       = TYPE_STYLES[contact.type] ?? TYPE_STYLES.client;
   const initials = `${contact.Name?.[0] ?? ""}${contact.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
 
@@ -80,6 +84,14 @@ function ContactViewModal({ contact, onClose }: { contact: Contact; onClose: () 
               <p className="text-sm font-medium text-foreground">{f.value || "—"}</p>
             </div>
           ))}
+          <div className="col-span-2 p-3 rounded-xl" style={{ background: "var(--background)" }}>
+            <p className="text-xs text-muted-foreground mb-2">Service</p>
+            <ServiceChips services={toServiceArray(contact.service)} />
+          </div>
+          <div className="col-span-2 p-3 rounded-xl" style={{ background: "var(--background)" }}>
+            <p className="text-xs text-muted-foreground mb-2">Projets</p>
+            <ProjectChips names={projectNames} />
+          </div>
           {contact.tags?.length > 0 && (
             <div className="col-span-2 p-3 rounded-xl" style={{ background: "var(--background)" }}>
               <p className="text-xs text-muted-foreground mb-2">Tags</p>
@@ -102,7 +114,7 @@ function ContactViewModal({ contact, onClose }: { contact: Contact; onClose: () 
 }
 
 function ContactModal({
-  contact, saving, onClose, onSave, agents, role,
+  contact, saving, onClose, onSave, agents, role, projects,
 }: {
   contact: Partial<Contact>;
   saving: boolean;
@@ -110,6 +122,7 @@ function ContactModal({
   onSave: (data: Omit<Contact, "id" | "contactId">) => void;
   agents: StaffMember[];
   role: UserRole | null;
+  projects: ProjectOption[];
 }) {
   const [Name,        setName]        = useState(contact.Name        ?? "");
   const [Lastname,    setLastname]    = useState(contact.Lastname    ?? "");
@@ -123,6 +136,8 @@ function ContactModal({
   const [tags,        setTags]        = useState<string[]>(contact.tags ?? []);
   const [DealValue,   setDealValue]   = useState(contact.DealValue?.toString() ?? "");
   const [assignedTo,  setAssignedTo]  = useState(contact.assignedTo ?? "");
+  const [service,     setService]     = useState<string[]>(toServiceArray(contact.service));
+  const [projectIds,  setProjectIds]  = useState<string[]>(contact.projectIds ?? []);
 
   const addTag = () => {
     const t = tagInput.trim();
@@ -216,6 +231,16 @@ function ContactModal({
           )}
 
           <div className="col-span-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Service</label>
+            <ServiceMultiSelect value={service} onChange={setService} />
+          </div>
+
+          <div className="col-span-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Projets</label>
+            <ProjectMultiSelect projects={projects} value={projectIds} onChange={setProjectIds} />
+          </div>
+
+          <div className="col-span-2">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tags</label>
             <div className="flex gap-2 mt-1">
               <input value={tagInput} onChange={e => setTagInput(e.target.value)}
@@ -248,6 +273,8 @@ function ContactModal({
               Name, Lastname, Company, Email, Phone, type, status, lastContact, tags,
               DealValue: type === "client" && DealValue ? Number(DealValue) : undefined,
               assignedTo: assignedTo || undefined,
+              service,
+              projectIds,
             })}
             disabled={saving || !canSave}
             className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-60"
@@ -268,7 +295,9 @@ export function Contacts({ role, userId }: ContactsProps) {
   const [loading,        setLoading]        = useState(true);
   const [saving,         setSaving]         = useState(false);
   const [filter,         setFilter]         = useState<ContactType | "all">("all");
+  const [projectFilter,  setProjectFilter]  = useState<string>("all");
   const [search,         setSearch]         = useState("");
+  const { projects, nameOf } = useProjects();
   const [editingContact, setEditingContact] = useState<Partial<Contact> | undefined>(undefined);
   const [viewingContact, setViewingContact] = useState<Contact | null>(null);
   const [deleteConfirm,  setDeleteConfirm]  = useState<Contact | null>(null);
@@ -304,6 +333,8 @@ export function Contacts({ role, userId }: ContactsProps) {
       type: formData.type, status: formData.status,
       lastContact: formData.lastContact, tags: formData.tags,
       assignedTo: formData.assignedTo ?? null,
+      service: formData.service ?? [],
+      projectIds: formData.projectIds ?? [],
     };
     if (formData.type === "client" && formData.DealValue !== undefined) {
       payload.DealValue = formData.DealValue;
@@ -341,13 +372,14 @@ export function Contacts({ role, userId }: ContactsProps) {
   );
 
   const filtered = contacts.filter(c => {
-    const matchType   = filter === "all" || c.type === filter;
-    const fullName    = `${c.Name} ${c.Lastname}`.toLowerCase();
+    const matchType    = filter === "all" || c.type === filter;
+    const matchProject = projectFilter === "all" || (c.projectIds ?? []).includes(projectFilter);
+    const fullName     = `${c.Name} ${c.Lastname}`.toLowerCase();
     const matchSearch = !search ||
       fullName.includes(search.toLowerCase()) ||
       (c.Company ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (c.Email   ?? "").toLowerCase().includes(search.toLowerCase());
-    return matchType && matchSearch;
+    return matchType && matchProject && matchSearch;
   });
 
   const counts: Record<string, number> = {
@@ -399,6 +431,11 @@ export function Contacts({ role, userId }: ContactsProps) {
             ))}
           </div>
         )}
+        <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}
+          className="px-3 py-2 border border-border rounded-xl text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+          <option value="all">Tous les projets</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
       </div>
 
       <div className="flex-1 overflow-y-auto bg-card rounded-2xl border border-border">
@@ -410,7 +447,7 @@ export function Contacts({ role, userId }: ContactsProps) {
           <table className="w-full">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["#", "Nom", "Entreprise", "Email", "Téléphone", "Type", "Dernier contact", "CA", "Commercial", "Actions"].map(h => (
+                {["#", "Nom", "Entreprise", "Email", "Téléphone", "Type", "Projets", "Service", "Dernier contact", "CA", "Commercial", "Actions"].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -453,6 +490,10 @@ export function Contacts({ role, userId }: ContactsProps) {
                     <td className="px-4 py-3">
                       <span className="px-2 py-1 rounded-full text-xs font-medium" style={{ background: ts.bg, color: ts.color }}>{ts.label}</span>
                     </td>
+                    <td className="px-4 py-3">
+                      <ProjectChips names={(c.projectIds ?? []).map(nameOf).filter(Boolean)} />
+                    </td>
+                    <td className="px-4 py-3"><ServiceChips services={toServiceArray(c.service)} /></td>
                     <td className="px-4 py-3 text-sm text-muted-foreground">
                       {c.lastContact ? new Date(c.lastContact).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                     </td>
@@ -489,7 +530,7 @@ export function Contacts({ role, userId }: ContactsProps) {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-12 text-center text-muted-foreground text-sm">Aucun contact trouvé</td></tr>
+                <tr><td colSpan={12} className="px-4 py-12 text-center text-muted-foreground text-sm">Aucun contact trouvé</td></tr>
               )}
             </tbody>
           </table>
@@ -502,6 +543,7 @@ export function Contacts({ role, userId }: ContactsProps) {
           saving={saving}
           agents={agents}
           role={role}
+          projects={projects}
           onClose={() => setEditingContact(undefined)}
           onSave={(data) => handleSave(data, editingContact)}
         />
@@ -521,7 +563,11 @@ export function Contacts({ role, userId }: ContactsProps) {
       )}
 
       {viewingContact && (
-        <ContactViewModal contact={viewingContact} onClose={() => setViewingContact(null)} />
+        <ContactViewModal
+          contact={viewingContact}
+          projectNames={(viewingContact.projectIds ?? []).map(nameOf).filter(Boolean)}
+          onClose={() => setViewingContact(null)}
+        />
       )}
     </div>
   );

@@ -1,11 +1,12 @@
 // src/firebase/crud/users.ts
 import {
-  collection, doc, getDoc, setDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, setDoc, updateDoc,
   getDocs, query, where
 } from 'firebase/firestore';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { db, firebaseConfig } from '../config';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions, firebaseConfig } from '../config';
 import type { UserRole } from '../../hooks/useAuth';
 
 export interface StaffMember {
@@ -61,11 +62,12 @@ export const updateUserProfile = async (uid: string, data: Partial<StaffMember>)
   ]);
 };
 
+// Deletes the user from Firebase Auth AND their Firestore users/staff docs.
+// This must go through the Cloud Function because the client SDK cannot delete
+// another user's auth account (it can only delete the currently signed-in one).
 export const deleteUser = async (uid: string) => {
-  await Promise.all([
-    deleteDoc(doc(db, 'users', uid)),
-    deleteDoc(doc(db, 'staff', uid)),
-  ]);
+  const callable = httpsCallable(functions, 'deleteStaffMember');
+  await callable({ uid });
 };
 
 export const getAdminCount = async (): Promise<number> => {
