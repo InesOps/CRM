@@ -269,11 +269,6 @@ export function Dashboard({ role }: DashboardProps) {
             {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} — {dashboardSubtitle}
           </p>
         </div>
-        <select className="text-sm border border-border rounded-lg px-3 py-2 bg-card text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30">
-          <option>Ce trimestre</option>
-          <option>Ce mois</option>
-          <option>Cette année</option>
-        </select>
       </div>
 
       {/* KPIs */}

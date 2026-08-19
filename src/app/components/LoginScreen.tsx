@@ -414,22 +414,6 @@ export function LoginScreen() {
               {loading ? "Connexion en cours…" : "Se connecter"}
             </button>
           </form>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground">ou</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          {/* Register button */}
-          <button
-            onClick={() => setView("register")}
-            className="w-full py-2.5 rounded-xl text-sm font-medium border border-border transition-all hover:bg-muted flex items-center justify-center gap-2 text-foreground"
-          >
-            <UserPlus size={15} />
-            Créer un compte
-          </button>
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">

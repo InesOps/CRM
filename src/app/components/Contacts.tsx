@@ -443,11 +443,25 @@ export function Contacts({ role, userId }: ContactsProps) {
             <Loader2 size={20} className="animate-spin" /><span className="text-sm">Chargement…</span>
           </div>
         ) : (
-          <table className="w-full">
+          <table className="w-full table-fixed">
+            <colgroup>
+              <col style={{ width: "3%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "12%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "11%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "6%" }} />
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 {["#", "Nom", "Entreprise", "Email", "Téléphone", "Type", "Projets", "Service", "Dernier contact", "CA", "Commercial", "Actions"].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
+                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -457,13 +471,13 @@ export function Contacts({ role, userId }: ContactsProps) {
                 const initials = `${c.Name?.[0] ?? ""}${c.Lastname?.[0] ?? ""}`.toUpperCase() || "?";
                 return (
                   <tr key={c.id} className="hover:bg-muted/40 transition-colors" style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{c.contactId ?? "—"}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 text-xs font-mono text-muted-foreground">{c.contactId ?? "—"}</td>
+                    <td className="px-3 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
                           style={{ background: ts.bg, color: ts.color }}>{initials}</div>
-                        <div>
-                          <div className="text-sm font-medium text-foreground">{c.Name} {c.Lastname}</div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate" title={`${c.Name ?? ""} ${c.Lastname ?? ""}`}>{c.Name} {c.Lastname}</div>
                           <div className="flex items-center gap-1 mt-0.5">
                             <div className="w-1.5 h-1.5 rounded-full" style={{ background: c.status === "actif" ? "#10B981" : "#94A3B8" }} />
                             <span className="text-xs text-muted-foreground">{c.status}</span>
@@ -471,43 +485,44 @@ export function Contacts({ role, userId }: ContactsProps) {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5 text-sm text-foreground">
-                        <Building size={12} className="text-muted-foreground" />{c.Company || "—"}
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1.5 text-sm text-foreground min-w-0">
+                        <Building size={12} className="text-muted-foreground shrink-0" />
+                        <span className="truncate" title={c.Company || ""}>{c.Company || "—"}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <a href={`mailto:${c.Email}`} className="flex items-center gap-1.5 text-sm hover:underline" style={{ color: "var(--primary)" }}>
-                        <Mail size={12} />{c.Email}
+                    <td className="px-3 py-3">
+                      <a href={`mailto:${c.Email}`} className="flex items-center gap-1.5 text-sm hover:underline min-w-0" style={{ color: "var(--primary)" }} title={c.Email}>
+                        <Mail size={12} className="shrink-0" /><span className="truncate">{c.Email}</span>
                       </a>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                         <Phone size={12} />{c.Phone || "—"}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <span className="px-2 py-1 rounded-full text-xs font-medium" style={{ background: ts.bg, color: ts.color }}>{ts.label}</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <ProjectChips names={(c.projectIds ?? []).map(nameOf).filter(Boolean)} />
                     </td>
-                    <td className="px-4 py-3"><ServiceChips services={toServiceArray(c.service)} /></td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                    <td className="px-3 py-3"><ServiceChips services={toServiceArray(c.service)} /></td>
+                    <td className="px-3 py-3 text-sm text-muted-foreground">
                       {c.lastContact ? new Date(c.lastContact).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                     </td>
-                    <td className="px-4 py-3 text-sm font-medium" style={{ color: c.DealValue ? "#10B981" : "var(--muted-foreground)" }}>
+                    <td className="px-3 py-3 text-sm font-medium" style={{ color: c.DealValue ? "#10B981" : "var(--muted-foreground)" }}>
                       {c.DealValue ? `${Number(c.DealValue).toLocaleString("fr-FR")} DT` : "—"}
                     </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                    <td className="px-3 py-3 text-sm text-muted-foreground">
                       {c.assignedTo ? (
-                        <span className="flex items-center gap-1.5">
-                          <UserCheck size={12} style={{ color: "#10B981" }} />
-                          {agentNameMap[c.assignedTo] ?? "—"}
+                        <span className="flex items-center gap-1.5 min-w-0" title={agentNameMap[c.assignedTo] ?? ""}>
+                          <UserCheck size={12} style={{ color: "#10B981" }} className="shrink-0" />
+                          <span className="truncate">{agentNameMap[c.assignedTo] ?? "—"}</span>
                         </span>
                       ) : "—"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="flex items-center gap-1">
                         {isAgent ? (
                           <button onClick={() => setViewingContact(c)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Voir les infos">

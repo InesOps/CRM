@@ -19,7 +19,8 @@ interface Task {
   title: string;
   description: string;
   priority: Priority;
-  assignee: string;
+  assignee: string;       // owner uid — used to filter "my tasks"
+  assigneeLabel: string;  // free-text initials shown on the card
   dueDate: string;
   tags: string[];
   column: Column;
@@ -70,9 +71,9 @@ function TaskCard({ task, onDelete, onEdit }: {
             <Calendar size={11} />
             {task.dueDate ? new Date(task.dueDate).toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) : "—"}
           </span>
-          {task.assignee && (
+          {task.assigneeLabel && (
             <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold"
-              style={{ background: "var(--primary)", color: "white" }}>{task.assignee}</span>
+              style={{ background: "var(--primary)", color: "white" }}>{task.assigneeLabel}</span>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -181,7 +182,7 @@ function TaskModal({ task, saving, columns, onClose, onSave }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Assigné à</label>
-              <input value={form.assignee || ""} onChange={e => set("assignee", e.target.value)}
+              <input value={form.assigneeLabel || ""} onChange={e => set("assigneeLabel", e.target.value)}
                 maxLength={3}
                 className="w-full mt-1 px-3 py-2 border border-border rounded-lg text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
@@ -203,6 +204,7 @@ function TaskModal({ task, saving, columns, onClose, onSave }: {
               description: form.description ?? "",
               priority:    form.priority    ?? "medium",
               assignee:    form.assignee    ?? "",
+              assigneeLabel: form.assigneeLabel ?? "",
               dueDate:     form.dueDate     ?? "",
               tags:        form.tags        ?? [],
               column:      form.column      ?? "todo",
@@ -257,9 +259,9 @@ export function Tasks() {
   const handleSave = async (formData: Omit<Task, "id">, existingId?: string) => {
     setSaving(true);
     try {
-      const payload = existingId
-        ? formData
-        : { ...formData, assignee: user!.uid };
+      // Always keep the owner uid so "my tasks" filter (assignee == uid) still
+      // matches after an edit — otherwise the task would vanish on reload.
+      const payload = { ...formData, assignee: user!.uid };
       if (existingId) {
         await updateTask(existingId, payload);
         setTasks(ts => ts.map(t => t.id === existingId ? { id: existingId, ...payload } : t));
